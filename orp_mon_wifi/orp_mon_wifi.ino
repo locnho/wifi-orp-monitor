@@ -72,6 +72,7 @@ bool oled_idle = 0;
 unsigned long oled_refresh_ts = 0;
 unsigned long oled_alive = 0;
 #define OLED_IDLE_TIMEOUT_MS      (2*60000)
+bool oled_screen_refresh = 0;
 
 //
 // Status message
@@ -173,21 +174,24 @@ void serial_setup()
 // Status support functions
 void set_status_msg(char *msg)
 {
-    strcpy(status_msg, msg);
-    status_msg_ts = millis();
-    DBG_PRINTLN(msg);
+  strcpy(status_msg, msg);
+  status_msg_ts = millis();
+  DBG_PRINTLN(msg);
+  oled_screen_refresh = 1;
 }
 
 void clear_status_msg()
 {
   status_msg[0] = 0;
   status_msg_ts = 0;
+  oled_screen_refresh = 1;
 }
 
 void check_status_msg_expired()
 {
   if (status_msg[0] != 0 && (millis() - status_msg_ts) > 30000) {
     clear_status_msg();
+    oled_screen_refresh = 1;
   }
 }
 
@@ -394,11 +398,16 @@ void oled_update_normal(bool now)
 {
   char msg[40];
 
-  if (now == 0 && (millis() - oled_refresh_ts) <= 500)
+  if (now == 0 && (millis() - oled_refresh_ts) <= 1000)
     return;
   if (oled_idle) {
     return;
   }
+  if (!oled_screen_refresh) {
+    return;
+  }
+
+  oled_screen_refresh = 0;
   oled_refresh_ts = millis();
 
   oled_title_update_print();
@@ -638,6 +647,7 @@ void button_rotate(Rotary& r)
 {
   DBG_PRINTLN(r.getPosition());
   clear_idle_timer();
+  oled_screen_refresh = 1;
   switch (op_state) {
   case OP_MENU:
     {
@@ -683,10 +693,12 @@ void button_click(Button2& btn)
   DBG_PRINTLN("Click");
   if (oled_idle) {
     clear_idle_timer();
+    oled_screen_refresh = 1;
     return;
   }
 
   clear_idle_timer();
+  oled_screen_refresh = 1;
   switch (op_state) {
   case OP_NORMAL:
     op_state = OP_MENU;
@@ -876,15 +888,20 @@ void orp_loop()
       set_status_msg("CAL OK");
       orp_caled = -1;
       orp_query_ts = 0;
+      oled_screen_refresh = 1;
     }
     orp_line_cnt = 0;
     break;
   default:
     if (orp_caled < 0) {
-      if (strncmp(orp_line, "?CAL,0", 6) == 0)
+      if (strncmp(orp_line, "?CAL,0", 6) == 0) {
         orp_caled = 0;
-      if (strncmp(orp_line, "?CAL,1", 6) == 0)
+        oled_screen_refresh = 1;
+      }
+      if (strncmp(orp_line, "?CAL,1", 6) == 0) {
         orp_caled = 1;
+        oled_screen_refresh = 1;
+      }
     }
     
     if (!isdigit(orp_line[0])) {
@@ -898,6 +915,7 @@ void orp_loop()
     ORP_PRINTLN(msg);
     ord_ts = millis();
     orp_line_cnt = 0;
+    oled_screen_refresh = 1;
 #if defined(WIFI_SUPPORT)
     if ((millis() - mqtt_orp_publish_ts) >= ORP_PUBLISH_TIMEMS) {
       mqtt_publish(orp_reading);
@@ -989,7 +1007,12 @@ int wifi_loop()
 
 void wifi_rssi_update()
 {
-  rssi = WiFi.RSSI();
+  long val = WiFi.RSSI();
+
+  if (val != rssi) {
+    oled_screen_refresh = 1;
+    rssi = val;
+  }
 }
 
 /////////////////////////////////////////////////////////////////////
@@ -1249,11 +1272,13 @@ void mqtt_loop()
 
   if (mqtt_connect_first_time && !mqtt_client.connected()) {
     op_state = OP_MQTT_CONNECT;
+    oled_screen_refresh = 1;
     return;
   }
   
   if (!mqtt_client.connected() && ((millis() - mqtt_connect_ts) >= 60000)) {
     op_state = OP_MQTT_CONNECT;
+    oled_screen_refresh = 1;
     return;
   }
 }
@@ -1265,6 +1290,7 @@ int mqtt_connect()
     mqtt_subscribed = 0;
     if (mqtt_addr == no_addr) {
       set_status_msg("MQTT resolving");
+      oled_screen_refresh = 1;
       oled_update_mqtt_connect(1);
       int result = WiFi.hostByName(setting_info.mqtt_broker, mqtt_addr);
       if (result != 1) {
@@ -1276,14 +1302,17 @@ int mqtt_connect()
     }
     if (mqtt_addr != no_addr) {
       set_status_msg("MQTT connecting");
+      oled_screen_refresh = 1;
       oled_update_mqtt_connect(1);
       mqtt_client.setUsernamePassword(setting_info.mqtt_user, setting_info.mqtt_password);
       if (mqtt_client.connect(mqtt_addr, setting_info.mqtt_port)) {
         set_status_msg("MQTT connected");
+        oled_screen_refresh = 1;
         oled_update_mqtt_connect(1);
         return 0;
       } else {
         set_status_msg("MQTT connect failed");
+        oled_screen_refresh = 1;
         oled_update_mqtt_connect(1);
         mqtt_connect_ts = millis();
         return 1;
@@ -1295,6 +1324,7 @@ int mqtt_connect()
   } else if (!mqtt_subscribed) {
     //mqtt_client.subscribe(setting_info.mqtt_topic);
     set_status_msg("MQTT subscribed");
+    oled_screen_refresh = 1;
     oled_update_mqtt_connect(1);
     mqtt_subscribed = 1;
     mqtt_publish(orp_reading);

@@ -14,7 +14,7 @@ This project provides a WiFi Pool ORP Monitor device using the following parts:
 The device will send ORP reading from Atlas probe to a MQTT broker. By default it is configured to send ORP reading to AquaLinkD ORP. Though, you should be able to publish any message to MQTT broker.
 
 
-# How To Assembly the ORP Monitor Device
+# How To Assemble the ORP Monitor Device
 
 After you have printed the mounting housing (from folder models), perform the following steps:
 
@@ -55,7 +55,7 @@ After this, wait around 2 to 3 minutes on the mobile app. This will configure th
 
 To configure system setting such as MQTT broker, ORP calibrate value, etc, open a browser and enter the IP address as ``http://<ip address>``.
 
-You should the below image. Configure the host name, MQTT Server name, user, password, port, and topic. If your ORP calibration solution isn't 225 mV, change the ORP calibration value. Then click on the ``Submit`` button.
+You should see the below image. Configure the host name, MQTT Server name, user, password, port, and topic. If your ORP calibration solution isn't 225 mV, change the ORP calibration value. Then click on the ``Submit`` button.
 
 <img src="images/orp_monitor_config.png" width="256"/>
 
@@ -68,7 +68,9 @@ To calibrat ORP probe, perform these steps:
 
 # How to Read the LCD Screen
 
-The "CAL" indicats that the ORP has been calibrated. If there is an X over it, then it is not calibrated.
+<img src="images/IMG_5048.jpg" width="256"/>
+
+The "CAL" indicates that the ORP has been calibrated. If there is an X over it, then it is not calibrated.
 
 The upper right WiFi bar indicate the WiFi RSSI strength.
 
@@ -76,4 +78,5 @@ The "MQTT" indicates that it is connected to a MQTT broker.
 
 The IP address on the screen shows its IP address.
 
-The screen will turn off after some idle time.
+The screen will turn off after some idle time. Press the button to show the screen.
+
