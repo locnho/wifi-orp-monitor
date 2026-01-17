@@ -65,3 +65,15 @@ To calibrat ORP probe, perform these steps:
 
   1. Push the button
   2. Select "CAL ORP" and push the knob to start ORP calibration
+
+# How to Read the LCD Screen
+
+The "CAL" indicats that the ORP has been calibrated. If there is an X over it, then it is not calibrated.
+
+The upper right WiFi bar indicate the WiFi RSSI strength.
+
+The "MQTT" indicates that it is connected to a MQTT broker.
+
+The IP address on the screen shows its IP address.
+
+The screen will turn off after some idle time.
