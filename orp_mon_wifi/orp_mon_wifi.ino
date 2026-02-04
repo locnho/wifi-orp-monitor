@@ -55,6 +55,8 @@
   #define MQTT_PRINTLN(x)
 #endif
 
+#define FW_VERSION    "0.1"
+
 //
 // Rotary and Button
 #define ROTARY_PIN1	2
@@ -455,9 +457,13 @@ void oled_title_update(int show_ip = 0)
 void oled_status_alive_update(int show_status = 1)
 {
   oled_alive_update();
+
+  if (!show_status) {
+    return;
+  }
   
   u8g2.setFont(u8g2_font_helvB08_tf);
-  if (show_status && strlen(status_msg) > 0) {
+  if (strlen(status_msg) > 0) {
     u8g2.drawStr(0, 63, status_msg);
   } else if (timeStatus() == timeSet) {
     char msg[40];
@@ -663,7 +669,7 @@ int oled_update_setting_info()
   //u8g2.setFont(u8g2_font_helvB08_tf);
   u8g2.setFont(u8g2_font_courB08_tf);
   u8g2.drawStr(0, 24, setting_info.ssid);
-  sprintf(msg, "RSSI %d", WiFi.RSSI());
+  sprintf(msg, "FW %s RSSI %d", FW_VERSION, WiFi.RSSI());
   u8g2.drawStr(0, 32, msg);
   u8g2.drawStr(0, 40, setting_info.hostname);
   IPAddress ip_address = WiFi.localIP();
