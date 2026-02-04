@@ -17,6 +17,7 @@ SWGAnalyzer::SWGAnalyzer()
 
 void SWGAnalyzer::setup(int sample_time_sec, float std_dev, int orp_target_val, int orp_target_hysteresis_val, int orp_target_interval, int orp_target_guard, int orp_pct_val[5])
 {
+  active_guard = 0;
   orp_pct[0] = orp_pct_val[0];
   orp_pct[1] = orp_pct_val[1];
   orp_pct[2] = orp_pct_val[2];
@@ -123,21 +124,32 @@ int SWGAnalyzer::get_swg_pct()
 {
   float std_dev;
   float mean;
-  
+
   if (orp_std_deviation(std_dev, mean) < 0) {
     last_orp = mean;
     last_orp_pct = 0;
     return -1;
   }
 
-  if (mean >= (orp_target - orp_hysteresis)) {
-    last_orp = mean;
-    last_orp_pct = 0;
-    return 0;
+  if (active_guard > 0) {
+    if (mean > orp_target) {
+      last_orp = mean;
+      last_orp_pct = 0;
+      active_guard = 0;
+      return 0;
+    }
+  } else {
+    if (mean >= (orp_target - orp_hysteresis)) {
+      last_orp = mean;
+      last_orp_pct = 0;
+      active_guard = 0;
+      return 0;
+    }
   }
   if (mean < orp_low_bound) {
     last_orp = mean;
     last_orp_pct = 0;
+    active_guard = 0;
     return 0;
   }
   if (mean > orp_target) {
@@ -149,21 +161,27 @@ int SWGAnalyzer::get_swg_pct()
   int base_orp = orp_target - orp_hysteresis;
   if (mean >= (base_orp - (orp_interval * 1) + 1)) {
     last_orp_pct = orp_pct[0];
+    active_guard = 1;
     return orp_pct[0];
   } else if (mean >= (base_orp - (orp_interval * 2) + 1) && mean <= (base_orp - (orp_interval * 1))) {
     last_orp_pct = orp_pct[1];
+    active_guard = 2;
     return orp_pct[1];
   } else if (mean >= (base_orp - (orp_interval * 3) + 1) && mean <= (base_orp - (orp_interval * 2))) {
     last_orp_pct = orp_pct[2];
+    active_guard = 3;
     return orp_pct[2];
   } else if (mean >= (base_orp - (orp_interval * 4) + 1) && mean <= (base_orp - (orp_interval * 3))) {
     last_orp_pct = orp_pct[3];
+    active_guard = 4;
     return orp_pct[3];
   } else if (mean >= (base_orp - (orp_interval * 5) + 1) && mean <= (base_orp - (orp_interval * 4))) {
     last_orp_pct = orp_pct[4];
+    active_guard = 5;
     return orp_pct[4];
   } else {
     last_orp_pct = orp_pct[5];
+    active_guard = 6;
     return orp_pct[5];
   }
 }

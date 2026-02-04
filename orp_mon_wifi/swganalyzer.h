@@ -46,6 +46,7 @@ protected:
 
   float last_orp;
   int last_orp_pct;
+  int active_guard;
 
   int date_check;
   unsigned int start_time[7];
