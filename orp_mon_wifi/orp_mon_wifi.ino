@@ -125,13 +125,14 @@ typedef struct {
   uint32_t signature2;
   char ssid[64];
   char password[64];
+  char hostname[64];
   char mqtt_broker[64];
   char mqtt_topic[64];
   char mqtt_user[64];
   char mqtt_password[64];
   char mqtt_pump_topic[64];
   char mqtt_swg_topic[64];
-  char hostname[64];
+  char mqtt_orp_alarm_topic[64];
   char mqtt_datetime_topic[64];
   int mqtt_port;
   int orp_cal_mV;
@@ -156,6 +157,7 @@ typedef struct {
 #define MQTT_TOPIC_PUMP_DEFAULT     "aqualinkd/Filter_Pump"
 #define MQTT_TOPIC_SWG_DEFAULT      "aqualinkd/SWG/Percent"
 #define MQTT_TOPIC_DATETIME_DEFAULT "datetime"
+#define MQTT_TOPIC_ORP_ALARM_DEFAULT "homebridge"
 #define MQTT_USER_DEFAULT     "pi"
 #define MQTT_PORT_DEFAULT     1883
 #define HOSTNAME_DEFAULT      "ORP"
@@ -278,6 +280,7 @@ void orp_swg_ctrl_loop()
   }
 
   swg_pct = swg_anlyzer.get_swg_pct();
+  mqtt_orp_alarm_publish(swg_anlyzer.is_alarmed());
   if (swg_pct >= 0) {
     swg_set(swg_pct);
   }
@@ -563,7 +566,10 @@ void oled_update_normal(bool now)
   float v1 = swg_anlyzer.get_last_orp();
   int v2 = swg_anlyzer.get_last_swg_pct();
   sprintf(msg1, "%0.1f", v1);
-  sprintf(msg2, "%0.1f   %d%%", v1, v2);
+  if (swg_anlyzer.is_alarmed())
+    sprintf(msg2, "%0.1f   Alarm", v1);
+  else
+    sprintf(msg2, "%0.1f   %d%%", v1, v2);
   x = (u8g2.getDisplayWidth()-10 - u8g2.getStrWidth(msg2)) / 2;
   x2 = u8g2.getStrWidth(msg1);
   u8g2.drawButtonUTF8(5 + x, 48 + 2, U8G2_BTN_BW0, u8g2.getDisplayWidth()-5*2,  0,  0, msg2);
@@ -910,6 +916,7 @@ void system_setting_clear()
   setting_info.swg_enable = SWG_ENABLE_DEFAULT;
   strcpy(setting_info.mqtt_swg_topic, MQTT_TOPIC_SWG_DEFAULT);
   strcpy(setting_info.mqtt_datetime_topic, MQTT_TOPIC_DATETIME_DEFAULT);
+  strcpy(setting_info.mqtt_orp_alarm_topic, MQTT_TOPIC_ORP_ALARM_DEFAULT);
   for (int i = 0; i < 7; i++){
     setting_info.start_schedule[i] = START_SCHEDULE_DEFAULT;
     setting_info.end_schedule[i] = END_SCHEDULE_DEFAULT;
@@ -962,6 +969,9 @@ void system_setting_init()
 
   str = prefs.getString("MQTTDTTOPIC", MQTT_TOPIC_DATETIME_DEFAULT);
   strcpy(setting_info.mqtt_datetime_topic, str.c_str());
+
+  str = prefs.getString("MQTTORPALARMTOPIC", MQTT_TOPIC_ORP_ALARM_DEFAULT);
+  strcpy(setting_info.mqtt_orp_alarm_topic, str.c_str());
 
   for (int i = 0; i < 7; i++) {
     char key_name[40];
@@ -1017,6 +1027,7 @@ void system_setting_save()
   prefs.putInt("SWGTIME", setting_info.swg_data_sample_time_sec);
 
   prefs.putString("MQTTDTTOPIC", setting_info.mqtt_datetime_topic);
+  prefs.putString("MQTTORPALARMTOPIC", setting_info.mqtt_orp_alarm_topic);
 
   for (int i = 0; i < 7; i++) {
     char key_name[40];
@@ -1095,11 +1106,14 @@ void orp_loop()
   if ((millis() - ord_ts) >= 1000) {
     ord_ts = millis();
     orp_caled = 1;
-    orp_reading = 620;
+    if (orp_reading == 620)
+      orp_reading = 550;
+    else
+    orp_reading = 550;
 #if defined(WIFI_SUPPORT)
     // Publish only if pump is ON.
     if ((millis() - mqtt_orp_publish_ts) >= ORP_PUBLISH_TIMEMS) {
-      if (mqtt_is_pump_on() && swg_anlyzer.is_scheduled()) {
+      if (mqtt_is_pump_on() && swg_anlyzer.is_scheduled())
         mqtt_publish(orp_reading);
       else
         mqtt_publish(0.0);
@@ -1423,17 +1437,17 @@ const char* htmlFormStart = R"rawliteral(
 
 const char* htmlHostname = R"rawliteral(
             <label for="hostname">Host Name:</label>
-            <input type="text" id="hostname" name="hostname" value="%s" required>
+            <input type="text" id="hostname" name="hostname" value="%s" title="Default is 'ORP'." required>
 )rawliteral";
 
 const char* htmlMqttBroker = R"rawliteral(
             <label for="broker">MQTT Server:</label>
-            <input type="text" id="broker" name="broker" value="%s" required>
+            <input type="text" id="broker" name="broker" value="%s" title="Default is 'aqualinkd.local'" required>
 )rawliteral";
 
 const char* htmlMqttUser = R"rawliteral(
             <label for="username">MQTT User:</label>
-            <input type="text" id="username" name="username" value="%s" required>
+            <input type="text" id="username" name="username" value="%s" title="Default is 'pi'" required>
 )rawliteral";
 
 const char* htmlMqttPassword = R"rawliteral(
@@ -1443,7 +1457,7 @@ const char* htmlMqttPassword = R"rawliteral(
 
 const char* htmlMqttPort = R"rawliteral(
             <label for="port">MQTT Port:</label>
-            <input type="text" id="port" name="port" value="%d" required>
+            <input type="text" id="port" name="port" value="%d" title="Default is 1883" required>
 )rawliteral";
 
 const char* htmlMqttTopic = R"rawliteral(
@@ -1461,45 +1475,50 @@ const char* htmlMqttSWGTopic = R"rawliteral(
             <input type="text" id="swgtopic" name="swgtopic" title="For AquaLinkD, set to 'aqualinkd/SWG/Percent'" value="%s" required>
 )rawliteral";
 
+const char* htmlMqttORAlarmPTopic = R"rawliteral(
+            <label for="orpalarmtopic">MQTT ORP Alarm Topic:</label>
+            <input type="text" id="orpalarmtopic" name="orpalarmtopic" title="Set topic for ORP alarm (based on homebridge-mqtt). Set to blank to disable. Default is 'homebridge'" value="%s" require>
+)rawliteral";
+
 const char* htmlOrpCalmV = R"rawliteral(
             <div class="form-group">
             <label2 for="orpcal">ORP Calibration mV:</label2>
-            <input type="side" id="orpcal" name="orpcal" value="%d" required>
+            <input type="side" id="orpcal" name="orpcal" value="%d" title="Default is 225" required>
             </div>
 )rawliteral";
 
 const char* htmlSWGTgt = R"rawliteral(
             <div class="form-group">
             <label2 for="swgtarget">SWG Target mV:</label2>
-            <input type="side" id="swgtarget" name="swgtarget" onchange="updateField()" value="%d" required>
+            <input type="side" id="swgtarget" name="swgtarget" onchange="updateField()" title="Default is 700" value="%d" required>
             </div>
 )rawliteral";
 
 const char* htmlSWGHyst = R"rawliteral(
             <div class="form-group">
             <label2 for="swghysteresis">SWG Hysteresis mV:</label2>
-            <input type="side" id="swghysteresis" name="swghysteresis" onchange="updateField()" value="%d" required>
+            <input type="side" id="swghysteresis" name="swghysteresis" onchange="updateField()" title="Default is 25" value="%d" required>
             </div>
 )rawliteral";
 
 const char* htmlSWGStdDev = R"rawliteral(
             <div class="form-group">
             <label2 for="swgstddev">SWG Std Deviation mV:</label2>
-            <input type="side" id="swgstddev" name="swgstddev" value="%.1f" required>
+            <input type="side" id="swgstddev" name="swgstddev" value="%.1f" title="Default is 1.5" required>
             </div>
 )rawliteral";
 
 const char* htmlSWGInterval = R"rawliteral(
             <div class="form-group">
             <label2 for="swginterval">SWG Interval mV:</label2>
-            <input type="side" id="swginterval" name="swginterval" onchange="updateField()" value="%d" required>
+            <input type="side" id="swginterval" name="swginterval" onchange="updateField()" title="Default is 15" value="%d" required>
             </div>
 )rawliteral";
 
 const char* htmlSWGTime = R"rawliteral(
             <div class="form-group">
             <label2 for="swgtime">SWG Sample Time (sec):</label2>
-            <input type="side" id="swgtime" name="swgtime" value="%d" required>
+            <input type="side" id="swgtime" name="swgtime" title="Default is 600" value="%d" required>
             </div>
 )rawliteral";
 
@@ -1549,8 +1568,8 @@ const char* htmlMqttDTTopic = R"rawliteral(
 const char* htmlSchedule0 = R"rawliteral(
             <div class="form-group">
             <label2 id="scheduletxt0" for="schedule0">Sunday:</label2>
-            <input type="side2" id="schedule0" name="schedule0" value="%s" required>
-            <input type="side2" id="schedule0e" name="schedule0e" value="%s" required>
+            <input type="side2" id="schedule0" name="schedule0" value="%s" title="Default is 09:00:00" required>
+            <input type="side2" id="schedule0e" name="schedule0e" value="%s" title="Default is 15:00:00" required>
             </div>
 )rawliteral";
 const char* htmlSchedule1 = R"rawliteral(
@@ -1637,6 +1656,9 @@ void web_handle_root()
   server.sendContent(temp);  
 
   snprintf(temp, sizeof(temp), htmlMqttSWGTopic, setting_info.mqtt_swg_topic);
+  server.sendContent(temp);
+
+  snprintf(temp, sizeof(temp), htmlMqttORAlarmPTopic, setting_info.mqtt_orp_alarm_topic);
   server.sendContent(temp);
 
   snprintf(temp, sizeof(temp), htmlOrpCalmV, setting_info.orp_cal_mV);
@@ -1854,6 +1876,13 @@ void web_handle_mqtt_submit()
     setting_info.swg_enable = 0;
   }
 
+  if (server.hasArg("orpalarmtopic")) {
+    receivedMessage += " ";
+    receivedMessage += server.arg("orpalarmtopic");
+    strncpy(setting_info.mqtt_orp_alarm_topic, server.arg("orpalarmtopic").c_str(), 64);
+    setting_info.mqtt_orp_alarm_topic[63] = 0;
+  }
+
   for (int i = 0; i < 7; i++) {
     char tag0[40];
     char tag1[40];
@@ -2041,6 +2070,9 @@ int mqtt_connect()
       else
         mqtt_publish(0.0);
     }
+    //
+    // Create ORP alarm
+    mqtt_swg_alarm_create();
     return 1;
   } else {
     return 1;
@@ -2094,6 +2126,37 @@ void mqtt_swg_publish(int pct)
   mqtt_client.endMessage();
   MQTT_PRINT("MQTT: SWG ");
   MQTT_PRINTLN(msg);
+}
+
+void mqtt_swg_alarm_create()
+{
+  char msg[80];
+
+  if (strlen(setting_info.mqtt_orp_alarm_topic) <= 0) {
+    return;
+  }
+
+  sprintf(msg, "%s/to/add", setting_info.mqtt_orp_alarm_topic);
+  mqtt_client.beginMessage(msg);
+  mqtt_client.print("{\"name\": \"ORP Alarm\", \"service_name\": \"ORP Alarm\", \"service\": \"Switch\"}");
+  mqtt_client.endMessage();
+}
+
+void mqtt_orp_alarm_publish(int alarm)
+{
+  char msg_topic[80];
+
+  if (strlen(setting_info.mqtt_orp_alarm_topic) <= 0) {
+    return;
+  }
+
+  sprintf(msg_topic, "%s/to/set", setting_info.mqtt_orp_alarm_topic);
+  mqtt_client.beginMessage(msg_topic);
+  if (alarm)
+      mqtt_client.print("{\"name\": \"ORP Alarm\", \"service_name\": \"ORP Alarm\", \"characteristic\": \"On\", \"value\": true}");
+  else
+      mqtt_client.print("{\"name\": \"ORP Alarm\", \"service_name\": \"ORP Alarm\", \"characteristic\": \"On\", \"value\": false}");
+  mqtt_client.endMessage();
 }
 
 void web_loop()

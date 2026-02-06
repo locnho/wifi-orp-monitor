@@ -26,6 +26,7 @@ public:
 
   void enable_datetime_check(int enable);
   int is_scheduled();
+  int is_alarmed();
   void set_schedule(int day_num, int start, int end);
 
 protected:
@@ -47,6 +48,7 @@ protected:
   float last_orp;
   int last_orp_pct;
   int active_guard;
+  int alarm;
 
   int date_check;
   unsigned int start_time[7];

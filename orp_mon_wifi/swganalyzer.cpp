@@ -18,6 +18,7 @@ SWGAnalyzer::SWGAnalyzer()
 void SWGAnalyzer::setup(int sample_time_sec, float std_dev, int orp_target_val, int orp_target_hysteresis_val, int orp_target_interval, int orp_target_guard, int orp_pct_val[5])
 {
   active_guard = 0;
+  alarm = 0;
   orp_pct[0] = orp_pct_val[0];
   orp_pct[1] = orp_pct_val[1];
   orp_pct[2] = orp_pct_val[2];
@@ -114,9 +115,11 @@ int SWGAnalyzer::orp_std_deviation(float &std_dev, float &mean)
   // Calculate the standard deviation (square root of variance)
   std_dev = sqrt(sum_deviation / total_data);
 
-  if (std_dev > orp_std_dev)
+  if (std_dev > orp_std_dev) {
+    alarm = 1;
     return -1;
-
+  }
+  alarm = 0;
   return 0;
 }
 
@@ -150,6 +153,7 @@ int SWGAnalyzer::get_swg_pct()
     last_orp = mean;
     last_orp_pct = 0;
     active_guard = 0;
+    alarm = 1;
     return 0;
   }
   if (mean > orp_target) {
@@ -219,4 +223,9 @@ void SWGAnalyzer::set_schedule(int day_num, int start, int end)
     return;
   start_time[day_num] = start;
   end_time[day_num] = end;
+}
+
+int SWGAnalyzer::is_alarmed()
+{
+  return alarm;
 }
