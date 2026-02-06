@@ -71,7 +71,12 @@ If the compute ORP value is within the range as shown in the figure below, set t
 
 If ORP value below the configured range, then set the SWG to 0%.
 
+If you want to enable scheduling, set the "MQTT Date Topic" and configure the week day schedule accordingly. The value in this topic is the number of second since 1970 as an big endian unsigned integer. This is posted by this project https://github.com/locnho/chem-feeder-mqtt.
+
 <img src="images/orp_monitor_config.png" width="256"/>
+
+<img src="images/orp_schedule.png" width="256"/>
+
 
 # How To Calibrate ORP Probe
 
@@ -102,7 +107,7 @@ The second line reading shows:
   * ORP reading as computed
   * SWG percent this device configured the SWG via MQTT
 
-
+If the computed ORP reading deviated more than the set standard deviation, "Alarm" will be show instead the SWG percentage.
 
 
 The screen will turn off after some idle time. Press the button to show the screen.
