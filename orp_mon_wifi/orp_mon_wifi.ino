@@ -55,7 +55,7 @@
   #define MQTT_PRINTLN(x)
 #endif
 
-#define FW_VERSION    "0.1"
+#define FW_VERSION    "0.2"
 
 //
 // Rotary and Button
@@ -1625,10 +1625,11 @@ const char* htmlFormEnd = R"rawliteral(
 
 </html>
 )rawliteral";
-  
+
+char temp[600];
+
 void web_handle_root()
 {
-  char temp[400];
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
   server.send(200, "text/html", htmlFormStart);
 
@@ -1784,11 +1785,12 @@ void web_handle_mqtt_submit()
 {
   receivedMessage = "";
   if (server.hasArg("hostname")) {
-    receivedMessage = server.arg("hostname");
+    receivedMessage += server.arg("hostname");
     strncpy(setting_info.hostname, server.arg("hostname").c_str(), 64);
     setting_info.hostname[63] = 0;
   }
   if (server.hasArg("broker")) {
+    receivedMessage += " ";
     receivedMessage = server.arg("broker");
     strncpy(setting_info.mqtt_broker, server.arg("broker").c_str(), 64);
     setting_info.mqtt_broker[63] = 0;
@@ -1891,6 +1893,7 @@ void web_handle_mqtt_submit()
     if (server.hasArg(tag0) && server.hasArg(tag1)) {
       receivedMessage += " ";
       receivedMessage += server.arg(tag0);
+      receivedMessage += " ";
       receivedMessage += server.arg(tag1);
       int ts = schedule_get_second(server.arg(tag0).c_str());
       int te = schedule_get_second(server.arg(tag1).c_str());

@@ -184,9 +184,9 @@ int SWGAnalyzer::get_swg_pct()
     active_guard = 5;
     return orp_pct[4];
   } else {
-    last_orp_pct = orp_pct[5];
+    last_orp_pct = orp_pct[4];
     active_guard = 6;
-    return orp_pct[5];
+    return orp_pct[4];
   }
 }
 
