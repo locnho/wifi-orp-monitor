@@ -55,7 +55,7 @@
   #define MQTT_PRINTLN(x)
 #endif
 
-#define FW_VERSION    "0.2"
+#define FW_VERSION    "0.3"
 
 //
 // Rotary and Button
@@ -1467,7 +1467,7 @@ const char* htmlMqttTopic = R"rawliteral(
 
 const char* htmlMqttPumpTopic = R"rawliteral(
             <label for="pumptopic">MQTT Pump Topic:</label>
-            <input type="text" id="pumptopic" name="pumptopic" title="For AquaLinkD, set to 'aqualinkd/Filter_Pump'" value="%s" required>
+            <input type="text" id="pumptopic" name="pumptopic" title="For AquaLinkD, set to 'aqualinkd/Filter_Pump'. To ignore, leave blank." value="%s">
 )rawliteral";
 
 const char* htmlMqttSWGTopic = R"rawliteral(
@@ -1823,6 +1823,8 @@ void web_handle_mqtt_submit()
     receivedMessage += server.arg("pumptopic");
     strncpy(setting_info.mqtt_pump_topic, server.arg("pumptopic").c_str(), 64);
     setting_info.mqtt_pump_topic[63] = 0;
+  } else {
+    setting_info.mqtt_pump_topic[0] = '\0';
   }
   if (server.hasArg("swgtopic")) {
     receivedMessage += " ";
