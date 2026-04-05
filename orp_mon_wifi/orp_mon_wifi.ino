@@ -55,7 +55,7 @@
   #define MQTT_PRINTLN(x)
 #endif
 
-#define FW_VERSION    "0.3"
+#define FW_VERSION    "0.5"
 
 //
 // Rotary and Button
@@ -147,6 +147,10 @@ typedef struct {
 
   int start_schedule[7];
   int end_schedule[7];
+
+  int swg_orp_active_time_hrs;
+  int swg_orp_delay_time_hrs;
+  int swg_orp_measure_time_hrs;
 } Setting_Info;
 
 #define SIGNATURE1    0x57494649
@@ -250,13 +254,18 @@ void rotary_button_setup()
 ///////////////////////////////////////////////////////////////////////////////
 #include "swganalyzer.h"
 unsigned long orp_swg_ctl_chk_ts;
-SWGAnalyzer swg_anlyzer;
+SWGAnalyzerv2 swg_anlyzer;
 
 void orp_data_setup()
 {
-  swg_anlyzer.setup(setting_info.swg_data_sample_time_sec, setting_info.swg_orp_std_dev, setting_info.swg_orp_target,
-                    setting_info.swg_orp_hysteresis, setting_info.swg_orp_interval, setting_info.swg_orp_guard,
-                    setting_info.swg_orp_pct);
+  swg_anlyzer.setup();
+  if (swg_anlyzer.get_alg_id() == 1)
+    swg_anlyzer.setup_alg(setting_info.swg_data_sample_time_sec, setting_info.swg_orp_std_dev, setting_info.swg_orp_target,
+                          setting_info.swg_orp_hysteresis, setting_info.swg_orp_interval, setting_info.swg_orp_guard,
+                          setting_info.swg_orp_pct);
+  else
+    swg_anlyzer.setup_alg(setting_info.swg_orp_target, setting_info.swg_orp_active_time_hrs, setting_info.swg_orp_delay_time_hrs,
+                          setting_info.swg_orp_measure_time_hrs);
 
   for (int i = 0; i < 7; i++) {
     swg_anlyzer.set_schedule(i, setting_info.start_schedule[i], setting_info.end_schedule[i]);
@@ -279,7 +288,7 @@ void orp_swg_ctrl_loop()
     return;
   }
 
-  swg_pct = swg_anlyzer.get_swg_pct();
+  swg_pct = swg_anlyzer.get_swg_pct(mqtt_swg_pct <= 0 ? 0 : 1);
   mqtt_orp_alarm_publish(swg_anlyzer.is_alarmed());
   if (swg_pct >= 0) {
     swg_set(swg_pct);
@@ -921,6 +930,9 @@ void system_setting_clear()
     setting_info.start_schedule[i] = START_SCHEDULE_DEFAULT;
     setting_info.end_schedule[i] = END_SCHEDULE_DEFAULT;
   }
+  setting_info.swg_orp_active_time_hrs = SWG_ORP_ACTIVE_TIME_HRS_DEFAULT;
+  setting_info.swg_orp_delay_time_hrs = SWG_ORP_DELAY_TIME_HRS_DEFAULT;
+  setting_info.swg_orp_measure_time_hrs = SWG_ORP_MEASURE_TIME_HRS_DEFAULT;
 }
 
 void system_setting_init()
@@ -981,6 +993,10 @@ void system_setting_init()
     setting_info.end_schedule[i] = prefs.getInt(key_name, END_SCHEDULE_DEFAULT);
   }
 
+  setting_info.swg_orp_active_time_hrs = prefs.getInt("SWGORPACTHRS", SWG_ORP_ACTIVE_TIME_HRS_DEFAULT);
+  setting_info.swg_orp_delay_time_hrs = prefs.getInt("SWGORPDELAYHRS", SWG_ORP_DELAY_TIME_HRS_DEFAULT);
+  setting_info.swg_orp_measure_time_hrs = prefs.getInt("SWGORPMEASHRS", SWG_ORP_MEASURE_TIME_HRS_DEFAULT);
+
 #endif
   DBG_PRINT("WiFi: ");
   DBG_PRINTLN(setting_info.ssid);
@@ -1036,6 +1052,11 @@ void system_setting_save()
     sprintf(key_name, "ENDCHEDULE%d", i);
     prefs.putInt(key_name, setting_info.end_schedule[i]);
   }
+
+  prefs.putInt("SWGORPACTHRS", setting_info.swg_orp_active_time_hrs);
+  prefs.putInt("SWGORPDELAYHRS", setting_info.swg_orp_delay_time_hrs);
+  prefs.putInt("SWGORPMEASHRS", setting_info.swg_orp_measure_time_hrs);
+
 #endif
 }
 
@@ -1191,7 +1212,7 @@ void orp_loop()
     }
 #endif
     if (mqtt_is_pump_on()) {
-      swg_anlyzer.orp_add(orp_reading);
+      swg_anlyzer.orp_add(orp_reading, mqtt_swg_pct <= 0 ? 0 : 1);
     }
     break;
   }
@@ -1560,6 +1581,27 @@ const char* htmlSWGPct4 = R"rawliteral(
             </div>
 )rawliteral";
 
+const char* htmlOrpActHrs = R"rawliteral(
+            <div class="form-group">
+            <label2 for="orpacthrs">SWG Control Active Time (hrs):</label2>
+            <input type="side" id="orpacthrs" name="orpacthrs" value="%d" title="The number of number to active SWG. Default is 3 hours." required>
+            </div>
+)rawliteral";
+
+const char* htmlOrpDelayHrs = R"rawliteral(
+            <div class="form-group">
+            <label2 for="orpdelayhrs">SWG Control Delay Time (hrs):</label2>
+            <input type="side" id="orpdelayhrs" name="orpdelayhrs" value="%d" title="The number of hours to delay before start SWG control. Default is 72 hours." required>
+            </div>
+)rawliteral";
+
+const char* htmlOrpMeasHrs = R"rawliteral(
+            <div class="form-group">
+            <label2 for="orpmeashrs">SWG Control Measure Time (hrs):</label2>
+            <input type="side" id="orpmeashrs" name="orpmeashrs" value="%d" title="The number of hours to sample ORP reading before consider a value sample. Default is 3 hours." required>
+            </div>
+)rawliteral";
+
 const char* htmlMqttDTTopic = R"rawliteral(
             <label for="dttopic">MQTT Date Topic:</label>
             <input type="text" id="dttopic" name="dttopic" title="Set topic to 'datetime' to enable schedule. Leave blank to disable. Schedule applies to MQTT ORP reporting as well" value="%s" required>
@@ -1671,43 +1713,54 @@ void web_handle_root()
   snprintf(temp, sizeof(temp), htmlSWGTgt, setting_info.swg_orp_target);
   server.sendContent(temp);
 
-  snprintf(temp, sizeof(temp), htmlSWGHyst, setting_info.swg_orp_hysteresis);
-  server.sendContent(temp);
+  if (swg_anlyzer.get_alg_id() == 1) {
+    snprintf(temp, sizeof(temp), htmlSWGHyst, setting_info.swg_orp_hysteresis);
+    server.sendContent(temp);
 
-  snprintf(temp, sizeof(temp), htmlSWGStdDev, setting_info.swg_orp_std_dev);
-  server.sendContent(temp);
+    snprintf(temp, sizeof(temp), htmlSWGStdDev, setting_info.swg_orp_std_dev);
+    server.sendContent(temp);
 
-  snprintf(temp, sizeof(temp), htmlSWGInterval, setting_info.swg_orp_interval);
-  server.sendContent(temp);
+    snprintf(temp, sizeof(temp), htmlSWGInterval, setting_info.swg_orp_interval);
+    server.sendContent(temp);
 
-  snprintf(temp, sizeof(temp), htmlSWGTime, setting_info.swg_data_sample_time_sec);
-  server.sendContent(temp);
+    snprintf(temp, sizeof(temp), htmlSWGTime, setting_info.swg_data_sample_time_sec);
+    server.sendContent(temp);
 
-  snprintf(temp, sizeof(temp), htmlSWGPct0,
-           setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 1) + 1,
-           setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 0),
-           setting_info.swg_orp_pct[0]);
-  server.sendContent(temp);
-  snprintf(temp, sizeof(temp), htmlSWGPct1,
-           setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 2) + 1,
-           setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 1),
-           setting_info.swg_orp_pct[1]);
-  server.sendContent(temp);
-  snprintf(temp, sizeof(temp), htmlSWGPct2,
-           setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 3) + 1,
-           setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 2),
-           setting_info.swg_orp_pct[2]);
-  server.sendContent(temp);
-  snprintf(temp, sizeof(temp), htmlSWGPct3,
-           setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 4) + 1,
-           setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 3),
-           setting_info.swg_orp_pct[3]);
-  server.sendContent(temp);
-  snprintf(temp, sizeof(temp), htmlSWGPct4,
-           setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 5),
-           setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 4),
-           setting_info.swg_orp_pct[4]);
-  server.sendContent(temp);
+    snprintf(temp, sizeof(temp), htmlSWGPct0,
+            setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 1) + 1,
+            setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 0),
+            setting_info.swg_orp_pct[0]);
+    server.sendContent(temp);
+    snprintf(temp, sizeof(temp), htmlSWGPct1,
+            setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 2) + 1,
+            setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 1),
+            setting_info.swg_orp_pct[1]);
+    server.sendContent(temp);
+    snprintf(temp, sizeof(temp), htmlSWGPct2,
+            setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 3) + 1,
+            setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 2),
+            setting_info.swg_orp_pct[2]);
+    server.sendContent(temp);
+    snprintf(temp, sizeof(temp), htmlSWGPct3,
+            setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 4) + 1,
+            setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 3),
+            setting_info.swg_orp_pct[3]);
+    server.sendContent(temp);
+    snprintf(temp, sizeof(temp), htmlSWGPct4,
+            setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 5),
+            setting_info.swg_orp_target - setting_info.swg_orp_hysteresis - (setting_info.swg_orp_interval * 4),
+            setting_info.swg_orp_pct[4]);
+    server.sendContent(temp);
+  }
+
+  if (swg_anlyzer.get_alg_id() == 2) {
+    snprintf(temp, sizeof(temp), htmlOrpActHrs, setting_info.swg_orp_active_time_hrs);
+    server.sendContent(temp);
+    snprintf(temp, sizeof(temp), htmlOrpDelayHrs, setting_info.swg_orp_delay_time_hrs);
+    server.sendContent(temp);
+    snprintf(temp, sizeof(temp), htmlOrpMeasHrs, setting_info.swg_orp_measure_time_hrs);
+    server.sendContent(temp);
+  }
 
   char val1[40];
   char val2[40];
@@ -1843,35 +1896,57 @@ void web_handle_mqtt_submit()
     receivedMessage += server.arg("swgtarget");
     setting_info.swg_orp_target = atoi(server.arg("swgtarget").c_str());
   }
-  if (server.hasArg("swghysteresis")) {
-    receivedMessage += " ";
-    receivedMessage += server.arg("swghysteresis");
-    setting_info.swg_orp_hysteresis = atoi(server.arg("swghysteresis").c_str());
-  }
-  if (server.hasArg("swgstddev")) {
-    receivedMessage += " ";
-    receivedMessage += server.arg("swgstddev");
-    setting_info.swg_orp_std_dev = atof(server.arg("swgstddev").c_str());
-  }
-  if (server.hasArg("swginterval")) {
-    receivedMessage += " ";
-    receivedMessage += server.arg("swginterval");
-    setting_info.swg_orp_interval = atoi(server.arg("swginterval").c_str());
-  }
-  if (server.hasArg("swgtime")) {
-    receivedMessage += " ";
-    receivedMessage += server.arg("swgtime");
-    setting_info.swg_data_sample_time_sec = atoi(server.arg("swgtime").c_str());
-  }
-  for (int i = 0; i < 5; i++) {
-    char tag[40];
-    sprintf(tag, "swgpct%d", i);
-    if (server.hasArg(tag)) {
+
+  if (swg_anlyzer.get_alg_id() == 1) {
+    if (server.hasArg("swghysteresis")) {
       receivedMessage += " ";
-      receivedMessage += server.arg(tag);
-      setting_info.swg_orp_pct[i] = atoi(server.arg(tag).c_str());
+      receivedMessage += server.arg("swghysteresis");
+      setting_info.swg_orp_hysteresis = atoi(server.arg("swghysteresis").c_str());
+    }
+    if (server.hasArg("swgstddev")) {
+      receivedMessage += " ";
+      receivedMessage += server.arg("swgstddev");
+      setting_info.swg_orp_std_dev = atof(server.arg("swgstddev").c_str());
+    }
+    if (server.hasArg("swginterval")) {
+      receivedMessage += " ";
+      receivedMessage += server.arg("swginterval");
+      setting_info.swg_orp_interval = atoi(server.arg("swginterval").c_str());
+    }
+    if (server.hasArg("swgtime")) {
+      receivedMessage += " ";
+      receivedMessage += server.arg("swgtime");
+      setting_info.swg_data_sample_time_sec = atoi(server.arg("swgtime").c_str());
+    }
+    for (int i = 0; i < 5; i++) {
+      char tag[40];
+      sprintf(tag, "swgpct%d", i);
+      if (server.hasArg(tag)) {
+        receivedMessage += " ";
+        receivedMessage += server.arg(tag);
+        setting_info.swg_orp_pct[i] = atoi(server.arg(tag).c_str());
+      }
     }
   }
+
+  if (swg_anlyzer.get_alg_id() == 2) {
+    if (server.hasArg("orpacthrs")) {
+      receivedMessage += " ";
+      receivedMessage += server.arg("orpacthrs");
+      setting_info.swg_orp_active_time_hrs = atoi(server.arg("swgtime").c_str());
+    }
+    if (server.hasArg("orpdelayhrs")) {
+      receivedMessage += " ";
+      receivedMessage += server.arg("orpdelayhrs");
+      setting_info.swg_orp_delay_time_hrs = atoi(server.arg("orpdelayhrs").c_str());
+    }
+    if (server.hasArg("orpmeashrs")) {
+      receivedMessage += " ";
+      receivedMessage += server.arg("orpmeashrs");
+      setting_info.swg_orp_measure_time_hrs = atoi(server.arg("orpmeashrs").c_str());
+    }
+  }
+
   if (server.hasArg("swgctrl")) {
     receivedMessage += " SWG Enable";
     setting_info.swg_enable = 1;
