@@ -18,7 +18,6 @@ LFLAGS = /nologo /OUT:$(OUTDIR)\$(TARGET)
 
 # Define objects from different folders
 OBJS = $(OUTDIR)\swgtest.obj \
-       $(OUTDIR)\Time.obj \
        $(OUTDIR)\swganalyzer.obj
 
 # Default target
@@ -35,12 +34,12 @@ $(OUTDIR)\$(TARGET): $(OBJS)
 $(OUTDIR)\swgtest.obj: swgtest.cpp
     $(CC) $(CFLAGS) /c swgtest.cpp /Fo$@
 
-$(OUTDIR)\Time.obj: Time.cpp
-    $(CC) $(CFLAGS) /c Time.cpp /Fo$@
+# $(OUTDIR)\Time.obj: Time.cpp
+#     $(CC) $(CFLAGS) /c Time.cpp /Fo$@
 
 $(OUTDIR)\swganalyzer.obj: ..\orp_mon_wifi\swganalyzer.cpp
     $(CC) $(CFLAGS) /c ..\orp_mon_wifi\swganalyzer.cpp /Fo$@
 
 # Clean target
 clean:
-    del $(OUTDIR)\*.obj $(OUTDIR)\$(TARGET)
+    @if exist "$(OUTDIR)" rd /s /q "$(OUTDIR)"

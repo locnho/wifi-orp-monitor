@@ -12,7 +12,7 @@
 #include <sstream>
 #include <vector>
 #include <string>
-#include "TimeLib.h"
+#include <time.h>
 #include "swganalyzer.h"
 #include <chrono>
 #include <ctime>
@@ -54,10 +54,22 @@ unsigned long my_millis()
   return sim_time_sec * 1000;
 }
 
+struct tm * my_localtime(const time_t * timer)
+{
+  return localtime(timer);
+}
+
+time_t my_time(time_t *timer)
+{
+  if (timer != NULL)
+    *timer = sim_time_sec;
+  return sim_time_sec;
+}
+
 int main(void)
 {
   char tstamp[80];
-  swg_anlyzer.set_millis_cb(my_millis);
+  swg_anlyzer.set_time_functions(my_millis, my_time, my_localtime);
   swg_anlyzer.setup();
   swg_anlyzer.setup_alg(695, 3, 3 * 24, 5);
   for (int i = 0; i < 7; i++) {
@@ -86,7 +98,6 @@ int main(void)
     // struct tm dt_utc = *gmtime(&timestamp);
     // time_t utctstamp = mktime(&dt_utc);
     sim_time_sec = (unsigned long) (localtstamp);
-    setTime(localtstamp);
 
     if (localtstamp < time_start)
       continue;
@@ -101,6 +112,9 @@ int main(void)
 
     unsigned int orp_val = stoi(element[1]);
     unsigned int swg_pct = stoi(element[2]);
+
+    if (orp_val <= 0)
+      continue;
 
     struct tm temp_stamp = {}; // Initialize to zero
     temp_stamp.tm_year = 2026 - 1900; // 4/2/2026
@@ -121,7 +135,7 @@ int main(void)
     cout << "Avg " << swg_anlyzer.get_orp_day_avg(0) << " " << swg_anlyzer.get_orp_day_avg(1) << " "
                    << swg_anlyzer.get_orp_day_avg(2) << " " << swg_anlyzer.get_orp_day_avg(3) << " "
                    << swg_anlyzer.get_orp_day_avg(4) << " " << swg_anlyzer.get_orp_day_avg(5) << " "
-                   << swg_anlyzer.get_orp_day_avg(6) << " ";
+                   << swg_anlyzer.get_orp_day_avg(6) << " Current day " << swg_anlyzer.get_orp_day_curr() << " ";
     cout << "ORP Target " << swg_anlyzer.get_orp_target() << " "; 
     // cout << "Total " << swg_anlyzer.orp_day_total[0] << " " << swg_anlyzer.orp_day_total[1] << " " << swg_anlyzer.orp_day_total[2] << " " << swg_anlyzer.orp_day_total[3] << " "
     //                << swg_anlyzer.orp_day_total[4] << " " << swg_anlyzer.orp_day_total[5] << " " << swg_anlyzer.orp_day_total[6] << " "; 
@@ -132,56 +146,56 @@ int main(void)
     // cout << "Delay TS " << int64_t(swg_anlyzer.get_orp_day_delay_ts_ms()) << " Current Time " << my_millis() << " ";
     // cout << "Measure Time " << swg_anlyzer.orp_day_measure_time_ms << " ";
     // cout << "SWG Time " << swg_anlyzer.orp_day_swg_active_time_ms << " Cfg " << swg_anlyzer.orp_day_cfg_swg_time_ms << " ";
-    switch (swg_anlyzer.get_orp_day_state()) {
-    case ORP_DAY_STATE_INIT:
-      cout << "INIT ";
-      break;
-    case ORP_DAY_STATE_DELAY:
-      cout << "DELAY ";
-      break;
-    case ORP_DAY_STATE_MEASURE:
-      cout << "MEASURE ";
-      break;
-    case ORP_DAY_STATE_SCHEDULE_SWG:
-      cout << "SCHEDULE DELAY ";
-      break;
-    case ORP_DAY_STATE_ACTIVE_SWG:
-      cout << "SWG ACTIVE ";
-      break;
-    }
+    // switch (swg_anlyzer.get_orp_day_state()) {
+    // case ORP_DAY_STATE_INIT:
+    //   cout << "INIT ";
+    //   break;
+    // case ORP_DAY_STATE_DELAY:
+    //   cout << "DELAY ";
+    //   break;
+    // case ORP_DAY_STATE_MEASURE:
+    //   cout << "MEASURE ";
+    //   break;
+    // case ORP_DAY_STATE_SCHEDULE_SWG:
+    //   cout << "SCHEDULE DELAY ";
+    //   break;
+    // case ORP_DAY_STATE_ACTIVE_SWG:
+    //   cout << "SWG ACTIVE ";
+    //   break;
+    // }
     switch (swg_anlyzer.get_orp_day_reason_code()) {
     case ORP_DAY_RC_INIT:
       cout << "- Initializing";
       break;
     case ORP_DAY_RC_SCHEDULE_SWG_COMPLETE:
-      cout << "- SWG schedule completed";
+      cout << "- SWG schedule complete";
       break;
     case ORP_DAY_RC_SCHEDULE_SWG_WAITING:
-      cout << "- SWG schedule day waiting";
+      cout << "- SWG schedule wait for next day";
       break;
     case ORP_DAY_RC_MEASURING:
-      cout << "- Measuing Water";
+      cout << "- Measure water";
       break;
     case ORP_DAY_RC_MEAS_COMPLETE:
-      cout << "- Measuring completed";
+      cout << "- Measure complete";
       break;
     case ORP_DAY_RC_MEAS_DELAY_FOR_DAY:
-      cout << "- Measure delay for day";
+      cout << "- Measure today delay";
       break;
     case ORP_DAY_RC_MEAS_DELAY:
       cout << "- Measure delay";
       break;
     case ORP_DAY_RC_ACT_SWG_COMPLETE:
-      cout << "- SWG active completed";
+      cout << "- SWG activate complete";
       break;
     case ORP_DAY_RC_ACT_SWG:
-      cout << "- SWG active";
+      cout << "- SWG activate";
       break;
     case ORP_DAY_RC_DELAY_COMPLETE:
-      cout << "- Delay completed";
+      cout << "- Delay complete";
       break;
     case ORP_DAY_RC_DELAY:
-      cout << "- Delay active";
+      cout << "- Delay";
       break;
     }
     cout << endl;
