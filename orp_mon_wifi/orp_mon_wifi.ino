@@ -16,10 +16,8 @@
 #include <Wire.h>
 #include <HardwareSerial.h>
 
-#include <TimeLib.h>
-
 #define DBG_SUPPORT 1     /* Print general debug information */
-//#define DBG_STATUS 1    /* Print equivalent of menu on serail port */
+//#define DBG_STATUS 1    /* Print equivalent of menu on serial port */
 //#define DBG_MQTT 1        /* Print MQTT messages */
 #define DBG_ORP 1         /* Print ORP message */
 
@@ -119,6 +117,8 @@ enum OP_STATE op_state = OP_NORMAL;
 #include "sdkconfig.h"
 #include "WiFi.h"
 #include <ArduinoMDNS.h>
+#include "time.h"
+#include "esp_sntp.h"
 
 typedef struct {
   uint32_t signature1;
@@ -151,11 +151,16 @@ typedef struct {
   int swg_orp_active_time_hrs;
   int swg_orp_delay_time_hrs;
   int swg_orp_measure_time_hrs;
+  char ntp_server[64];
+  char ntp_tz[64];
 } Setting_Info;
 
 #define SIGNATURE1    0x57494649
 #define SIGNATURE2    0x00000003
-#define MQTT_BROKER_DEFAULT   ""
+#define MQTT_BROKER_DEFAULT   "aqualink.local"
+#define SSID_DEFAULT          ""
+#define SSID_PW_DEFAULT       ""
+#define MQTT_PW_DEFAULT       ""
 #define MQTT_SUGGEST_BROKER_DEFAULT "aqualink.local"
 #define MQTT_TOPIC_DEFAULT          "aqualinkd/CHEM/ORP/set"
 #define MQTT_TOPIC_PUMP_DEFAULT     "aqualinkd/Filter_Pump"
@@ -169,6 +174,8 @@ typedef struct {
 #define SWG_ENABLE_DEFAULT    1
 #define START_SCHEDULE_DEFAULT    (9*60*60)
 #define END_SCHEDULE_DEFAULT      (15*60*60)
+#define NTP_SERVER_DEFAULT        "pool.ntp.org"
+#define NTP_TZ_DEFAULT            "PST8PDT,M3.2.0,M11.1.0"
 Setting_Info setting_info;
 
 char mqtt_pump_topic_match[64];
@@ -185,9 +192,11 @@ unsigned long mqtt_orp_publish_ts = 0;
 
 enum WIFI_STATE wifi_state = OP_WIFI_IDLE;
 unsigned long wifi_setup_ts = 0;
-void mqtt_publish(float orp);
+void mqtt_publish(int orp);
 bool is_wifi_connected();
-int mqtt_is_subscribed();
+bool mqtt_is_subscribed();
+bool mqtt_is_connected();
+bool mqtt_is_connected_subscribed();
 
 unsigned long setting_info_ts = 0;
 
@@ -270,8 +279,10 @@ void orp_data_setup()
   for (int i = 0; i < 7; i++) {
     swg_anlyzer.set_schedule(i, setting_info.start_schedule[i], setting_info.end_schedule[i]);
   }
-  if (strlen(setting_info.mqtt_datetime_topic) > 0)
+  if (strlen(setting_info.ntp_server) > 0)
     swg_anlyzer.enable_datetime_check(1);
+  // else if (strlen(setting_info.mqtt_datetime_topic) > 0)
+  //   swg_anlyzer.enable_datetime_check(1);
   else
     swg_anlyzer.enable_datetime_check(0);
 }
@@ -414,7 +425,7 @@ void oled_wifi_update(int show_ip = 1)
     u8g2.drawStr(0, 54, ip_string.c_str());
   }
 
-  if (mqtt_is_subscribed()) {  
+  if (mqtt_is_connected_subscribed()) {  
     u8g2.setFont(u8g2_font_courR08_tf);
     u8g2.drawStr(u8g2.getDisplayWidth() - u8g2.getStrWidth("MQTT"), 15, "MQTT");
   }
@@ -477,33 +488,61 @@ void oled_status_alive_update(int show_status = 1)
   u8g2.setFont(u8g2_font_helvB08_tf);
   if (strlen(status_msg) > 0) {
     u8g2.drawStr(0, 63, status_msg);
-  } else if (timeStatus() == timeSet) {
+  } else {
     char msg[40];
-    sprintf(msg, "%02d/%02d/%02d %02d:%02d:%02d", month(), day(), year(), hour(), minute(), second());
-    u8g2.drawStr(0, 63, msg);
+    const time_t time_val_sec = time(NULL);
+    struct tm time_tm = *localtime(&time_val_sec);
+
+    if (time_tm.tm_year + 1970 > 2000) {
+      sprintf(msg, "%02d/%02d/%04d %02d:%02d:%02d", time_tm.tm_mon + 1, time_tm.tm_mday, time_tm.tm_year + 1970, time_tm.tm_hour, time_tm.tm_min, time_tm.tm_sec);
+      u8g2.drawStr(0, 63, msg);
+    }
   }
 }
 
 void oled_title_update_print()
 {
   if (orp_caled == 1) {
-    STATUS_PRINTLN("CAL");
+    STATUS_PRINT("CAL     ");
+  } else {
+    STATUS_PRINT("NOT CAL ");
   }
 
   if (mqtt_is_pump_on()) {
-    STATUS_PRINTLN("PUMP ON");
+    STATUS_PRINT("PUMP ON  ");
   } else {
-    STATUS_PRINTLN("PUMP OFF");
+    STATUS_PRINT("PUMP OFF ");
   }
 
 #if defined(WIFI_SUPPORT)
   if (is_wifi_connected()) {
     STATUS_PRINT("RSSI ");
-    STATUS_PRINTLN(rssi);
-    if (mqtt_is_subscribed()) {
-      STATUS_PRINTLN("MQTT");
+    STATUS_PRINT(rssi);
+    STATUS_PRINT(" ");
+    if (mqtt_is_connected()) {
+      STATUS_PRINT("MQTT    ");
+    } else {
+      STATUS_PRINT("NO MQTT ");
     }
-    STATUS_PRINTLN(WiFi.localIP());
+    if (mqtt_is_subscribed()) {
+      STATUS_PRINT("Subscribed     ");
+    } else {
+      STATUS_PRINT("NOT Subscribed ");
+    }
+    STATUS_PRINT(WiFi.localIP());
+    STATUS_PRINT(" ");
+
+    char msg[40];
+    const time_t time_val_sec = time(NULL);
+    struct tm time_tm = *localtime(&time_val_sec);
+
+    if (time_tm.tm_year + 1900 > 2000) {
+      sprintf(msg, "%02d/%02d/%04d %02d:%02d:%02d ", time_tm.tm_mon + 1, time_tm.tm_mday, time_tm.tm_year + 1900, time_tm.tm_hour, time_tm.tm_min, time_tm.tm_sec);
+      STATUS_PRINT("NTP ");
+      STATUS_PRINT(msg);
+    } else {
+      STATUS_PRINT("NTP --/--/---- --:--:-- ");
+    }
   }
 #endif
 }
@@ -511,7 +550,8 @@ void oled_title_update_print()
 void oled_status_alive_update_print()
 {
   if (strlen(status_msg) > 0) {
-    STATUS_PRINTLN(status_msg);
+    STATUS_PRINT(" ");
+    STATUS_PRINT(status_msg);
   }
 }
 
@@ -539,17 +579,18 @@ void oled_update_normal(bool now)
   else
     swg_pct = mqtt_swg_pct;
   if (is_orp_reading_expired()) {
-    sprintf(msg1, "----");
-    sprintf(msg2, "----   %d%%", swg_pct);
+    sprintf(msg1, "---- ");
+    sprintf(msg2, "----   %d%% ", swg_pct);
   } else {
-    sprintf(msg1, "%0.1f", orp_reading);
-    sprintf(msg2, "%0.1f   %d%%", orp_reading, swg_pct);
+    sprintf(msg1, "%0.1f ", orp_reading);
+    sprintf(msg2, "%0.1f   %d%% ", orp_reading, swg_pct);
   }
-  STATUS_PRINTLN(msg1);
-  STATUS_PRINTLN(msg2);
-  STATUS_PRINTLN(swg_anlyzer.get_last_orp());
-  STATUS_PRINTLN(swg_anlyzer.get_last_swg_pct());
+  STATUS_PRINT(msg1);
+  STATUS_PRINT(msg2);
+  STATUS_PRINT(swg_anlyzer.get_last_orp());
+  STATUS_PRINT(swg_anlyzer.get_last_swg_pct());
   oled_status_alive_update_print();
+  STATUS_PRINTLN("");
 
   if (!oled_detected)
     return;
@@ -933,6 +974,8 @@ void system_setting_clear()
   setting_info.swg_orp_active_time_hrs = SWG_ORP_ACTIVE_TIME_HRS_DEFAULT;
   setting_info.swg_orp_delay_time_hrs = SWG_ORP_DELAY_TIME_HRS_DEFAULT;
   setting_info.swg_orp_measure_time_hrs = SWG_ORP_MEASURE_TIME_HRS_DEFAULT;
+  strcpy(setting_info.ntp_server, NTP_SERVER_DEFAULT);
+  strcpy(setting_info.ntp_tz, NTP_TZ_DEFAULT);
 }
 
 void system_setting_init()
@@ -945,9 +988,10 @@ void system_setting_init()
   }
 #else
   prefs.begin("WIFI-INFO", false);
-  String str = prefs.getString("SSID", "");
+
+  String str = prefs.getString("SSID", SSID_DEFAULT);
   strcpy(setting_info.ssid, str.c_str());
-  str = prefs.getString("PW", "");
+  str = prefs.getString("PW", SSID_PW_DEFAULT);
   strcpy(setting_info.password, str.c_str());
   str = prefs.getString("MQTTBROKER", MQTT_BROKER_DEFAULT);
   strcpy(setting_info.mqtt_broker, str.c_str());
@@ -959,7 +1003,7 @@ void system_setting_init()
   strcpy(setting_info.mqtt_swg_topic, str.c_str());
   str = prefs.getString("MQTTUSER", MQTT_USER_DEFAULT);
   strcpy(setting_info.mqtt_user, str.c_str());
-  str = prefs.getString("MQTTPW", "");
+  str = prefs.getString("MQTTPW", MQTT_PW_DEFAULT);
   strcpy(setting_info.mqtt_password, str.c_str());
   str = prefs.getString("HOSTNAME", HOSTNAME_DEFAULT);
   strcpy(setting_info.hostname, str.c_str());
@@ -982,6 +1026,12 @@ void system_setting_init()
   str = prefs.getString("MQTTDTTOPIC", MQTT_TOPIC_DATETIME_DEFAULT);
   strcpy(setting_info.mqtt_datetime_topic, str.c_str());
 
+  str = prefs.getString("NTPSERVER", NTP_SERVER_DEFAULT);
+  strcpy(setting_info.ntp_server, str.c_str());
+
+  str = prefs.getString("NTPTZ", NTP_TZ_DEFAULT);
+  strcpy(setting_info.ntp_tz, str.c_str());
+
   str = prefs.getString("MQTTORPALARMTOPIC", MQTT_TOPIC_ORP_ALARM_DEFAULT);
   strcpy(setting_info.mqtt_orp_alarm_topic, str.c_str());
 
@@ -1002,7 +1052,7 @@ void system_setting_init()
   DBG_PRINTLN(setting_info.ssid);
   //DBG_PRINT("/");
   //DBG_PRINTLN(setting_info.password);
-  DBG_PRINTLN("MQTT:");
+  DBG_PRINT("MQTT: ");
   DBG_PRINTLN(setting_info.mqtt_broker);
   DBG_PRINTLN(setting_info.mqtt_user);
   // DBG_PRINTLN(setting_info.mqtt_password);
@@ -1010,6 +1060,8 @@ void system_setting_init()
   DBG_PRINTLN(setting_info.mqtt_topic);
   DBG_PRINTLN(setting_info.mqtt_pump_topic);
   DBG_PRINTLN(setting_info.orp_cal_mV);
+  DBG_PRINTLN(setting_info.ntp_server);
+  DBG_PRINTLN(setting_info.ntp_tz);
 }
 
 void system_setting_save()
@@ -1135,13 +1187,13 @@ void orp_loop()
     // Publish only if pump is ON.
     if ((millis() - mqtt_orp_publish_ts) >= ORP_PUBLISH_TIMEMS) {
       if (mqtt_is_pump_on() && swg_anlyzer.is_scheduled())
-        mqtt_publish(orp_reading);
+        mqtt_publish(int(orp_reading));
       else
-        mqtt_publish(0.0);
+        mqtt_publish(0);
       mqtt_orp_publish_ts = millis();
     }
 #endif
-    swg_anlyzer.orp_add(orp_reading);
+    swg_anlyzer.orp_add(int(orp_reading));
   }
 #else
 
@@ -1205,14 +1257,14 @@ void orp_loop()
 #if defined(WIFI_SUPPORT)
     if ((millis() - mqtt_orp_publish_ts) >= ORP_PUBLISH_TIMEMS) {
       if (mqtt_is_pump_on() && swg_anlyzer.is_scheduled())
-        mqtt_publish(orp_reading);
+        mqtt_publish(int(orp_reading));
       else
-        mqtt_publish(0.0);
+        mqtt_publish(0);
       mqtt_orp_publish_ts = millis();
     }
 #endif
     if (mqtt_is_pump_on()) {
-      swg_anlyzer.orp_add(orp_reading, mqtt_swg_pct <= 0 ? 0 : 1);
+      swg_anlyzer.orp_add(int(orp_reading), mqtt_swg_pct <= 0 ? 0 : 1);
     }
     break;
   }
@@ -1545,7 +1597,7 @@ const char* htmlSWGTime = R"rawliteral(
 
 const char* htmlSWGCtrl = R"rawliteral(
             <div class="form-group">
-            <label2 for="swgctrl">Enable SWG Change:</label2>
+            <label2 for="swgctrl">Enable SWG Control:</label2>
             <input type="checkbox" id="swgctrl" name="swgctrl" %s>
             </div>
 )rawliteral";
@@ -1605,6 +1657,16 @@ const char* htmlOrpMeasHrs = R"rawliteral(
 const char* htmlMqttDTTopic = R"rawliteral(
             <label for="dttopic">MQTT Date Topic:</label>
             <input type="text" id="dttopic" name="dttopic" title="Set topic to 'datetime' to enable schedule. Leave blank to disable. Schedule applies to MQTT ORP reporting as well" value="%s" required>
+)rawliteral";
+
+const char* htmlNtpServer = R"rawliteral(
+            <label for="ntpseerver">NTP Server:</label>
+            <input type="text" id="ntpseerver" name="ntpseerver" title="NTP server. Leave blank to disable. Default is pool.ntp.org." value="%s">
+)rawliteral";
+
+const char* htmlNtpTz = R"rawliteral(
+            <label for="ntptz">NTP Time Zone:</label>
+            <input type="text" id="ntptz" name="ntptz" title="NTP time zone. Leave blank to use UTC. Default is PST8PDT,M3.2.0,M11.1.0." value="%s">
 )rawliteral";
 
 const char* htmlSchedule0 = R"rawliteral(
@@ -1767,7 +1829,11 @@ void web_handle_root()
   int hr, minute, second;
   int val;
 
-  snprintf(temp, sizeof(temp), htmlMqttDTTopic, setting_info.mqtt_datetime_topic);
+  // snprintf(temp, sizeof(temp), htmlMqttDTTopic, setting_info.mqtt_datetime_topic);
+  // server.sendContent(temp);
+  snprintf(temp, sizeof(temp), htmlNtpServer, setting_info.ntp_server);
+  server.sendContent(temp);
+  snprintf(temp, sizeof(temp), htmlNtpTz, setting_info.ntp_tz);
   server.sendContent(temp);
 
   val = setting_info.start_schedule[0]; hr = val / (60*60); val -= hr * 60 * 60; minute = val / 60; val -= minute * 60; second = val;
@@ -1962,6 +2028,33 @@ void web_handle_mqtt_submit()
     setting_info.mqtt_orp_alarm_topic[63] = 0;
   }
 
+  // if (server.hasArg("dttopic")) {
+  //   receivedMessage += " ";
+  //   receivedMessage += server.arg("dttopic");
+  //   strncpy(setting_info.mqtt_datetime_topic, server.arg("dttopic").c_str(), 64);
+  //   setting_info.mqtt_datetime_topic[63] = 0;
+  // } else {
+  //   setting_info.mqtt_datetime_topic[0] = 0;
+  // }
+
+  if (server.hasArg("ntpseerver")) {
+    receivedMessage += " ";
+    receivedMessage += server.arg("ntpseerver");
+    strncpy(setting_info.ntp_server, server.arg("ntpseerver").c_str(), 64);
+    setting_info.ntp_server[63] = 0;
+  } else {
+    setting_info.ntp_server[0] = 0;
+  }
+
+  if (server.hasArg("ntptz")) {
+    receivedMessage += " ";
+    receivedMessage += server.arg("ntptz");
+    strncpy(setting_info.ntp_server, server.arg("ntptz").c_str(), 64);
+    setting_info.ntp_tz[63] = 0;
+  } else {
+    setting_info.ntp_tz[0] = 0;
+  }
+
   for (int i = 0; i < 7; i++) {
     char tag0[40];
     char tag1[40];
@@ -2044,16 +2137,19 @@ void mqtt_msg_recv(int messageSize)
       mqtt_swg_pct = -1;
   }
 
-  if (strlen(setting_info.mqtt_datetime_topic) > 0 &&
-      strcasecmp(topic, setting_info.mqtt_datetime_topic) == 0) {
-      uint32_t val = ntohl(*(uint32_t *) msg);
-    setTime(val);
-  }
+  // if (strlen(setting_info.mqtt_datetime_topic) > 0 &&
+  //     strcasecmp(topic, setting_info.mqtt_datetime_topic) == 0) {
+  //     uint32_t val = ntohl(*(uint32_t *) msg);
+  //   setTime(val);
+  // }
 }
 
 void mqtt_setup()
 {
-  mqtt_client.setId("ORP");
+  char id[80];
+  randomSeed(millis());
+  sprintf(id, "%s.%d", setting_info.hostname, random(1, 1000000));
+  mqtt_client.setId(id);
   mqtt_client.onMessage(mqtt_msg_recv);
 }
 
@@ -2115,6 +2211,7 @@ int mqtt_connect()
         set_status_msg("MQTT connected");
         oled_screen_refresh = 1;
         oled_update_mqtt_connect(1);
+        mqtt_connect_ts = millis();
         return 0;
       } else {
         set_status_msg("MQTT connect failed");
@@ -2137,18 +2234,18 @@ int mqtt_connect()
     if (strlen(setting_info.mqtt_swg_topic) > 0) {
       mqtt_client.subscribe(setting_info.mqtt_swg_topic);
     }
-    if (strlen(setting_info.mqtt_datetime_topic) > 0) {
-      mqtt_client.subscribe(setting_info.mqtt_datetime_topic);
-    }
+    // if (strlen(setting_info.mqtt_datetime_topic) > 0) {
+    //   mqtt_client.subscribe(setting_info.mqtt_datetime_topic);
+    // }
     set_status_msg("MQTT subscribed");
     oled_screen_refresh = 1;
     oled_update_mqtt_connect(1);
     mqtt_subscribed = 1;
     if (!is_orp_reading_expired()) {
       if (mqtt_is_pump_on())
-        mqtt_publish(orp_reading);
+        mqtt_publish(int(orp_reading));
       else
-        mqtt_publish(0.0);
+        mqtt_publish(0);
     }
     //
     // Create ORP alarm
@@ -2159,11 +2256,17 @@ int mqtt_connect()
   }
 }
 
-unsigned long mqtt_publish_ts = 0;
-float mqtt_publish_orp = -1;
-
-void mqtt_publish(float orp)
+bool mqtt_is_connected()
 {
+  return mqtt_client.connected() ?  1 : 0;
+}
+
+unsigned long mqtt_publish_ts = 0;
+int mqtt_publish_orp = -1;
+
+void mqtt_publish(int orp)
+{
+#if 0 
   char msg[40];
 
   // Only publish every 15 seconds if it is the same value
@@ -2173,7 +2276,7 @@ void mqtt_publish(float orp)
     }
   }
 
-  sprintf(msg, "%0.1f", orp);
+  sprintf(msg, "%d", orp);
   mqtt_client.beginMessage(setting_info.mqtt_topic);
   mqtt_client.print(msg);
   mqtt_client.endMessage();
@@ -2181,10 +2284,12 @@ void mqtt_publish(float orp)
   MQTT_PRINTLN(msg);
   mqtt_publish_orp = orp;
   mqtt_publish_ts = millis();
+#endif
 }
 
 void mqtt_swg_publish(int pct)
 {
+#if 0 
   char msg_topic[80];
   char msg[80];
 
@@ -2206,6 +2311,7 @@ void mqtt_swg_publish(int pct)
   mqtt_client.endMessage();
   MQTT_PRINT("MQTT: SWG ");
   MQTT_PRINTLN(msg);
+#endif
 }
 
 void mqtt_swg_alarm_create()
@@ -2244,7 +2350,12 @@ void web_loop()
   server.handleClient();
 }
 
-int mqtt_is_subscribed()
+bool mqtt_is_subscribed()
+{
+  return mqtt_subscribed ? 1 : 0;
+}
+
+bool mqtt_is_connected_subscribed()
 {
   if (mqtt_subscribed && mqtt_client.connected())
     return 1;
@@ -2281,6 +2392,20 @@ int mdns_loop()
   mdns.addServiceRecord("http", HTTP_PORT, MDNSServiceTCP);
   return 1;
 }
+
+void ntp_setup()
+{
+  if (strlen(setting_info.ntp_server) > 0) {
+    if (strlen(setting_info.ntp_tz) > 0)
+      configTzTime(setting_info.ntp_tz, setting_info.ntp_server);
+    else
+      configTime(0, 0, setting_info.ntp_server);
+  }
+}
+
+void ntp_loop()
+{
+}
 #else
 int wifi_loop() { return 1; }
 void mqtt_loop() {}
@@ -2290,12 +2415,9 @@ int mqtt_is_subscribed() { return 0; }
 int mqtt_connect() { return 1; }
 int mqtt_is_pump_on() { return 1; }
 int mdns_loop() {}
+void ntp_setup() {}
+void ntp_loop() {}
 #endif /* WIFI_SUPPORT */
-
-void time_setup()
-{
-  setSyncInterval(15 * 60);
-}
 
 void setup()
 {
@@ -2303,14 +2425,15 @@ void setup()
   oled_setup();
   oled_update_normal(1);
 
-  DBG_PRINTLN("ORP Monitor");
+  DBG_PRINT("ORP Monitor v");
+  DBG_PRINTLN(FW_VERSION);
 
   rotary_button_setup();
 
-  time_setup();
   wifi_setup();
   mqtt_setup();
   web_setup();
+  ntp_setup();
   orp_data_setup();
 }
 
@@ -2322,6 +2445,7 @@ void loop()
   mqtt_loop();
   web_loop();
   mdns_loop();
+  ntp_loop();
   orp_swg_ctrl_loop();
 
   switch (op_state) {

@@ -32,10 +32,12 @@ public:
   int is_alarmed() { return alarm; }
   void set_schedule(int day_num, int start, int end);
 
-  void set_millis_cb(unsigned long (*cb)());
+  void set_time_functions(unsigned long (*millis_cb_f)(), time_t (*time_cb_f)(time_t *timer), struct tm * (*localtime_cb_f)(const time_t * timer));
 
 protected:
   unsigned long (*millis_cb)();
+  struct tm * (*localtime_cb)(const time_t * timer);
+  time_t (*time_cb)(time_t *timer);
 
   int orp_target;
   int last_orp;
@@ -104,6 +106,7 @@ public:
   int get_orp_day_state() { return orp_day_state; }
   int get_orp_day_reason_code() { return orp_day_reason_code; }
   unsigned long get_orp_day_delay_ts_ms() { return orp_day_delay_ts_ms; }
+  int get_orp_day_curr() { return orp_day_curr; }
 
 protected:
   //

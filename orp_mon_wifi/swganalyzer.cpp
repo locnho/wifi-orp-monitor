@@ -3,7 +3,7 @@
 #else
   #include <math.h>
 #endif
-#include <TimeLib.h>
+#include <time.h>
 #include "swganalyzer.h"
 
 SWGAnalyzer::SWGAnalyzer()
@@ -16,14 +16,18 @@ SWGAnalyzer::SWGAnalyzer()
       SWG_ORP_PCT4_DEFAULT
   };
   millis_cb = NULL;
+  time_cb = NULL;
+  localtime_cb = NULL;
   setup();
   setup_alg(SWG_DATA_SAMPLE_TIME_SEC_DEFAULT, SWG_ORP_STD_DEV_DEFAULT, SWG_ORP_DEFAULT, SWG_ORP_HYSTERESIS_DEFAULT, SWG_ORP_INTERVAL_DEFAULT,
             SWG_ORP_GUARD_DEFAULT, pct);
 }
 
-void SWGAnalyzer::set_millis_cb(unsigned long (*cb)())
+void SWGAnalyzer::set_time_functions(unsigned long (*millis_cb_f)(), time_t (*time_cb_f)(time_t *timer), struct tm * (*localtime_cb_f)(const time_t * timer))
 {
-  millis_cb = cb;
+  millis_cb = millis_cb_f;
+  time_cb = time_cb_f;
+  localtime_cb = localtime_cb_f;
 }
 
 void SWGAnalyzer::setup()
@@ -92,10 +96,7 @@ void SWGAnalyzer::orp_add(int val, bool swg_active)
   }
   orp_data[orp_data_curr] = val;
   orp_data_valid[orp_data_curr] = 1;
-  if (millis_cb)
-    orp_data_ts[orp_data_curr++] = ms_time;
-  else
-    orp_data_ts[orp_data_curr++] = 0;
+  orp_data_ts[orp_data_curr++] = ms_time;
   if (orp_data_curr >= max_sample) {
     orp_data_curr = 0;
   }
@@ -111,11 +112,7 @@ int SWGAnalyzer::orp_std_deviation(float &std_dev, float &mean)
   std_dev = 0.0;
 
   // Calculate the mean
-  unsigned long ts;
-  if (millis_cb)
-    ts = millis_cb();
-  else
-    ts = 0;
+  unsigned long ts = millis_cb ? millis_cb() : 0;
   for (int i = 0; i < max_sample; ++i) {
     if (orp_data_valid[i] <= 0) {
       continue;
@@ -229,13 +226,19 @@ int SWGAnalyzer::is_scheduled()
   if (!date_check)
     return 1;
 
-  int today = weekday() - 1;
+  if (time_cb == NULL || localtime_cb == NULL)
+    return 0;
+
+  const time_t time_val_sec = time_cb(NULL);
+  struct tm time_tm = *localtime_cb(&time_val_sec);
+
+  int today = time_tm.tm_wday;
   if (today < 0 || today >= 7)
     return 0;
   if (start_time[today] == 0 && end_time[today] == 0)
     return 0;
 
-  unsigned int tm_sec= hour() * 60 * 60 + minute() * 60 + second();
+  unsigned int tm_sec= time_tm.tm_hour * 60 * 60 + time_tm.tm_min * 60 + time_tm.tm_sec;
   if (tm_sec >= start_time[today] && tm_sec <= end_time[today])
     return 1;
   return 0;
@@ -290,10 +293,15 @@ void SWGAnalyzerv2::setup_alg(int sample_time_sec, float std_dev, int orp_target
 
 void SWGAnalyzerv2::orp_add(int val,  bool swg_active)
 {
-  unsigned long ms_time = millis_cb ? millis_cb() : 0;
+  if (millis_cb == NULL || time_cb == NULL || localtime_cb == NULL)
+    return;
+
+  unsigned long ms_time = millis_cb();
+  const time_t time_val_sec = time_cb(NULL);
+  struct tm time_tm = *localtime_cb(&time_val_sec);
 
   // Check if same day
-  if (weekday() - 1 == orp_day_swg_wkday[orp_day_curr]) {
+  if (time_tm.tm_wday == orp_day_swg_wkday[orp_day_curr]) {
     orp_day_sum[orp_day_curr] += val;
     orp_day_total[orp_day_curr] += 1;
     orp_day_avg[orp_day_curr] = orp_day_sum[orp_day_curr] / orp_day_total[orp_day_curr];
@@ -304,6 +312,7 @@ void SWGAnalyzerv2::orp_add(int val,  bool swg_active)
     return;
   }
   // Next day sample
+  int prev = orp_day_curr;
   if (orp_day_curr == TOTAL_NUM_DAYS_SAMPLE - 1) {
     orp_day_curr = 0;
   } else {
@@ -314,7 +323,7 @@ void SWGAnalyzerv2::orp_add(int val,  bool swg_active)
   orp_day_total[orp_day_curr] = 1;
   orp_day_swg_act[orp_day_curr] = swg_active;
   orp_day_avg[orp_day_curr] = orp_day_sum[orp_day_curr] / orp_day_total[orp_day_curr];
-  orp_day_swg_wkday[orp_day_curr] = weekday() - 1;
+  orp_day_swg_wkday[orp_day_curr] = time_tm.tm_wday;
   orp_day_measured_time[orp_day_curr] = 0;
   orp_day_measured_ts[orp_day_curr] = ms_time;
 }
