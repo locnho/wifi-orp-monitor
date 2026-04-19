@@ -16,6 +16,7 @@
 #include "swganalyzer.h"
 #include <chrono>
 #include <ctime>
+#include <vector>
 
 using namespace std;
 
@@ -54,11 +55,6 @@ unsigned long my_millis()
   return sim_time_sec * 1000;
 }
 
-struct tm * my_localtime(const time_t * timer)
-{
-  return localtime(timer);
-}
-
 time_t my_time(time_t *timer)
 {
   if (timer != NULL)
@@ -66,12 +62,29 @@ time_t my_time(time_t *timer)
   return sim_time_sec;
 }
 
-int main(void)
+struct tm *my_localtime()
 {
+  time_t raw_time;
+
+  my_time(&raw_time);
+  return localtime(&raw_time);
+}
+
+int main(int argc, char *argv[])
+{
+  int pump_only = 0;
+
+  std::vector<std::string> args(argv + 1, argv + argc);
+  for (size_t i = 0; i < args.size(); ++i) {
+      if (args[i] == "--pump") {
+          pump_only = 1;
+      }
+  }
+
   char tstamp[80];
-  swg_anlyzer.set_time_functions(my_millis, my_time, my_localtime);
+  swg_anlyzer.set_time_functions(my_millis, my_localtime);
   swg_anlyzer.setup();
-  swg_anlyzer.setup_alg(695, 3, 3 * 24, 5);
+  swg_anlyzer.setup_alg(690, 3, 3 * 24, 5, 90);
   for (int i = 0; i < 7; i++) {
     swg_anlyzer.set_schedule(i, 0, 60*60*24);
   }
@@ -91,7 +104,7 @@ int main(void)
 
   for (const auto& element : orp_data) {
     time_t timestamp = stoi(element[0]);
-    int time_offset = 7*60*60;
+    int time_offset = 0;
     timestamp -= time_offset;
     struct tm dt_local = *localtime(&timestamp);
     time_t localtstamp = mktime(&dt_local);
@@ -107,8 +120,10 @@ int main(void)
     // cout << "Time Info " << hour() << " " << minute() << " " << second() << " Wk day " << weekday() - 1 << endl;
 
     // Limit stamp from 9:00 to 14:59 per day
-    if (dt_local.tm_hour < 9 || dt_local.tm_hour >= 15)
-      continue;
+    if (pump_only) {
+      if (dt_local.tm_hour < 9 || dt_local.tm_hour >= 15)
+        continue;
+    }
 
     unsigned int orp_val = stoi(element[1]);
     unsigned int swg_pct = stoi(element[2]);
@@ -116,22 +131,22 @@ int main(void)
     if (orp_val <= 0)
       continue;
 
-    struct tm temp_stamp = {}; // Initialize to zero
-    temp_stamp.tm_year = 2026 - 1900; // 4/2/2026
-    temp_stamp.tm_mon = 4 - 1;
-    temp_stamp.tm_mday = 2;          
-    temp_stamp.tm_hour = 9;
-    temp_stamp.tm_min = 0;
-    temp_stamp.tm_sec = 0;
-    time_t sim_swg_start = mktime(&temp_stamp);
-    if (localtstamp >= sim_swg_start)
-      swg_pct = 75;
+    // struct tm temp_stamp = {}; // Initialize to zero
+    // temp_stamp.tm_year = 2026 - 1900; // 4/2/2026
+    // temp_stamp.tm_mon = 4 - 1;
+    // temp_stamp.tm_mday = 2;          
+    // temp_stamp.tm_hour = 9;
+    // temp_stamp.tm_min = 0;
+    // temp_stamp.tm_sec = 0;
+    // time_t sim_swg_start = mktime(&temp_stamp);
+    // if (localtstamp >= sim_swg_start)
+    //   swg_pct = 75;
 
     swg_anlyzer.orp_add(orp_val, swg_pct > 0 ? 1 : 0);
     int pct = swg_anlyzer.get_swg_pct(swg_pct > 0 ? 1 : 0);
 
     strftime(tstamp, sizeof(tstamp), "%Y-%m-%d %H:%M:%S", &dt_local);
-    cout << tstamp << " ORP " << stoi(element[1]) << " SWG " << stoi(element[2]) << " PCT " << pct << " ";
+    cout << tstamp << " " << element[0] << " ORP " << stoi(element[1]) << " SWG " << stoi(element[2]) << " PCT " << pct << " ";
     cout << "Avg " << swg_anlyzer.get_orp_day_avg(0) << " " << swg_anlyzer.get_orp_day_avg(1) << " "
                    << swg_anlyzer.get_orp_day_avg(2) << " " << swg_anlyzer.get_orp_day_avg(3) << " "
                    << swg_anlyzer.get_orp_day_avg(4) << " " << swg_anlyzer.get_orp_day_avg(5) << " "

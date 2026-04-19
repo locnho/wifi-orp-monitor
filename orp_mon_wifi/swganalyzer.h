@@ -32,12 +32,11 @@ public:
   int is_alarmed() { return alarm; }
   void set_schedule(int day_num, int start, int end);
 
-  void set_time_functions(unsigned long (*millis_cb_f)(), time_t (*time_cb_f)(time_t *timer), struct tm * (*localtime_cb_f)(const time_t * timer));
+  void set_time_functions(unsigned long (*millis_cb_f)(), struct tm * (*localtime_cb_f)());
 
 protected:
   unsigned long (*millis_cb)();
-  struct tm * (*localtime_cb)(const time_t * timer);
-  time_t (*time_cb)(time_t *timer);
+  struct tm * (*localtime_cb)();
 
   int orp_target;
   int last_orp;
@@ -91,12 +90,13 @@ protected:
 #define ORP_DAY_RC_ACT_SWG                  9
 #define ORP_DAY_RC_DELAY_COMPLETE           10
 #define ORP_DAY_RC_DELAY                    11
+#define TOTAL_NUM_DAYS_SAMPLE               7
 
 class SWGAnalyzerv2 : public SWGAnalyzer {
 public:
   SWGAnalyzerv2();
   void setup();
-  void setup_alg(int orp_day_cfg_target_val, int orp_day_cfg_swg_time_hours, int orp_day_cfg_delay_time_hours, int orp_day_cfg_measure_time_hours);
+  void setup_alg(int orp_day_cfg_target_val, int orp_day_cfg_swg_time_hours, int orp_day_cfg_delay_time_hours, int orp_day_cfg_measure_time_hours, int orp_pct_val);
   void setup_alg(int sample_time_sec, float std_dev, int orp_target_val, int orp_target_hysteresis_val, int orp_target_interval, int orp_target_guard, int orp_pct_val[5]);
   void orp_add(int val,  bool swg_active);
   int get_swg_pct(bool swg_active);
@@ -107,11 +107,12 @@ public:
   int get_orp_day_reason_code() { return orp_day_reason_code; }
   unsigned long get_orp_day_delay_ts_ms() { return orp_day_delay_ts_ms; }
   int get_orp_day_curr() { return orp_day_curr; }
+  void set_orp_pct_val(int orp_pct_val) { orp_pct[0] = orp_pct_val; }
+  char get_orp_code_char_str();
 
 protected:
   //
   // 7 day scheduling
-  #define TOTAL_NUM_DAYS_SAMPLE   7
   int orp_day_sum[TOTAL_NUM_DAYS_SAMPLE];
   int orp_day_total[TOTAL_NUM_DAYS_SAMPLE];
   int orp_day_avg[TOTAL_NUM_DAYS_SAMPLE];
@@ -134,7 +135,6 @@ protected:
   unsigned long orp_day_measure_time_ms;
   unsigned long orp_day_cfg_measure_time_ms;
   int orp_day_schedule_day;
-  int orp_day_pct;
   int orp_day_reason_code;
 };
 

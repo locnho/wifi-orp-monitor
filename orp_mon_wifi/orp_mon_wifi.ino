@@ -16,10 +16,11 @@
 #include <Wire.h>
 #include <HardwareSerial.h>
 
-#define DBG_SUPPORT 1     /* Print general debug information */
-//#define DBG_STATUS 1    /* Print equivalent of menu on serial port */
-//#define DBG_MQTT 1        /* Print MQTT messages */
-#define DBG_ORP 1         /* Print ORP message */
+#define DBG_SUPPORT 1         /* Print general debug information */
+//#define DBG_STATUS 1        /* Print equivalent of menu on serial port */
+//#define DBG_MQTT 1          /* Print MQTT messages */
+#define DBG_ORP 1             /* Print ORP message */
+//#define SKIP_MQTT_PUBLISH 1   /* Set to 1 to skip publish any MQTT message - use for testing without actual control SWG */
 
 #if defined(DBG_SUPPORT)
   #define DBG_PRINT   Serial.print
@@ -136,7 +137,7 @@ typedef struct {
   char mqtt_datetime_topic[64];
   int mqtt_port;
   int orp_cal_mV;
-  int swg_enable;
+  int swg_control;          // 0 - disable; all other - enable
   int swg_orp_target;
   int swg_orp_hysteresis;
   float swg_orp_std_dev;
@@ -171,7 +172,7 @@ typedef struct {
 #define MQTT_PORT_DEFAULT     1883
 #define HOSTNAME_DEFAULT      "ORP"
 #define ORP_CAL_MV_DEFAULT    225
-#define SWG_ENABLE_DEFAULT    1
+#define SWG_CONTROL_DEFAULT    90
 #define START_SCHEDULE_DEFAULT    (9*60*60)
 #define END_SCHEDULE_DEFAULT      (15*60*60)
 #define NTP_SERVER_DEFAULT        "pool.ntp.org"
@@ -265,8 +266,25 @@ void rotary_button_setup()
 unsigned long orp_swg_ctl_chk_ts;
 SWGAnalyzerv2 swg_anlyzer;
 
+struct tm *my_localtime()
+{
+  static struct tm timeinfo;
+  
+  if (getLocalTime(&timeinfo)) 
+    return &timeinfo;
+  timeinfo.tm_year = 2000;
+  timeinfo.tm_mon = 0;
+  timeinfo.tm_mday = 1;
+  timeinfo.tm_hour = 0;
+  timeinfo.tm_min = 0;
+  timeinfo.tm_sec = 0;
+  timeinfo.tm_wday = 0;
+  return &timeinfo;
+}
+
 void orp_data_setup()
 {
+  swg_anlyzer.set_time_functions(millis, my_localtime);
   swg_anlyzer.setup();
   if (swg_anlyzer.get_alg_id() == 1)
     swg_anlyzer.setup_alg(setting_info.swg_data_sample_time_sec, setting_info.swg_orp_std_dev, setting_info.swg_orp_target,
@@ -274,7 +292,7 @@ void orp_data_setup()
                           setting_info.swg_orp_pct);
   else
     swg_anlyzer.setup_alg(setting_info.swg_orp_target, setting_info.swg_orp_active_time_hrs, setting_info.swg_orp_delay_time_hrs,
-                          setting_info.swg_orp_measure_time_hrs);
+                          setting_info.swg_orp_measure_time_hrs, setting_info.swg_control > 0 ? setting_info.swg_orp_pct[0] : 0);
 
   for (int i = 0; i < 7; i++) {
     swg_anlyzer.set_schedule(i, setting_info.start_schedule[i], setting_info.end_schedule[i]);
@@ -604,7 +622,7 @@ void oled_update_normal(bool now)
     u8g2.setFont(u8g2_font_ncenR14_tf);
   int x = (u8g2.getDisplayWidth()-10 - u8g2.getStrWidth(msg2)) / 2;
   int x2 = u8g2.getStrWidth(msg1);
-  if (setting_info.swg_enable)
+  if (setting_info.swg_control > 0)
     u8g2.drawButtonUTF8(5 + x, 34, U8G2_BTN_BW0, u8g2.getDisplayWidth()-5*2,  0,  0, msg2);
   else
     u8g2.drawButtonUTF8(5 + x, 34, U8G2_BTN_BW0, u8g2.getDisplayWidth()-5*2,  0,  0, msg1);
@@ -619,10 +637,12 @@ void oled_update_normal(bool now)
   if (swg_anlyzer.is_alarmed())
     sprintf(msg2, "%0.1f   Alarm", v1);
   else
-    sprintf(msg2, "%0.1f   %d%%", v1, v2);
+    sprintf(msg2, "%0.1f   %d%%  ", v1, v2);
   x = (u8g2.getDisplayWidth()-10 - u8g2.getStrWidth(msg2)) / 2;
   x2 = u8g2.getStrWidth(msg1);
   u8g2.drawButtonUTF8(5 + x, 48 + 2, U8G2_BTN_BW0, u8g2.getDisplayWidth()-5*2,  0,  0, msg2);
+  sprintf(msg2, "%c", swg_anlyzer.get_orp_code_char_str());
+  u8g2.drawButtonUTF8(u8g2.getDisplayWidth() - u8g2.getStrWidth(msg2) - 1, 48 + 2, U8G2_BTN_BW0, u8g2.getDisplayWidth()-5*2,  0,  0, msg2);
   u8g2.setFont(u8g2_font_ncenR08_tf);
   u8g2.drawStr(5 + x + x2 + 1, 39 + 2, "m");
   u8g2.drawStr(5 + x + x2 + 1, 48 + 2, "V");
@@ -958,12 +978,20 @@ void system_setting_clear()
   setting_info.swg_orp_interval = SWG_ORP_INTERVAL_DEFAULT;
   setting_info.swg_orp_guard = SWG_ORP_GUARD_DEFAULT;
   setting_info.swg_data_sample_time_sec = SWG_DATA_SAMPLE_TIME_SEC_DEFAULT;
-  setting_info.swg_orp_pct[0] = SWG_ORP_PCT0_DEFAULT;
-  setting_info.swg_orp_pct[1] = SWG_ORP_PCT1_DEFAULT;
-  setting_info.swg_orp_pct[2] = SWG_ORP_PCT2_DEFAULT;
-  setting_info.swg_orp_pct[3] = SWG_ORP_PCT3_DEFAULT;
-  setting_info.swg_orp_pct[4] = SWG_ORP_PCT4_DEFAULT;
-  setting_info.swg_enable = SWG_ENABLE_DEFAULT;
+  if (swg_anlyzer.get_alg_id() == 1) {
+    setting_info.swg_orp_pct[0] = SWG_ORP_PCT0_DEFAULT;
+    setting_info.swg_orp_pct[1] = SWG_ORP_PCT1_DEFAULT;
+    setting_info.swg_orp_pct[2] = SWG_ORP_PCT2_DEFAULT;
+    setting_info.swg_orp_pct[3] = SWG_ORP_PCT3_DEFAULT;
+    setting_info.swg_orp_pct[4] = SWG_ORP_PCT4_DEFAULT;
+  } else {
+    setting_info.swg_orp_pct[0] = SWG_CONTROL_DEFAULT;
+    setting_info.swg_orp_pct[1] = SWG_CONTROL_DEFAULT;
+    setting_info.swg_orp_pct[2] = SWG_CONTROL_DEFAULT;
+    setting_info.swg_orp_pct[3] = SWG_CONTROL_DEFAULT;
+    setting_info.swg_orp_pct[4] = SWG_CONTROL_DEFAULT;
+  }
+  setting_info.swg_control = SWG_CONTROL_DEFAULT;
   strcpy(setting_info.mqtt_swg_topic, MQTT_TOPIC_SWG_DEFAULT);
   strcpy(setting_info.mqtt_datetime_topic, MQTT_TOPIC_DATETIME_DEFAULT);
   strcpy(setting_info.mqtt_orp_alarm_topic, MQTT_TOPIC_ORP_ALARM_DEFAULT);
@@ -1010,7 +1038,7 @@ void system_setting_init()
   setting_info.mqtt_port = prefs.getInt("MQTTPORT", MQTT_PORT_DEFAULT);
   setting_info.orp_cal_mV = prefs.getInt("ORPCALMV", ORP_CAL_MV_DEFAULT);
 
-  setting_info.swg_enable = prefs.getInt("SWGENABLE", SWG_ENABLE_DEFAULT);
+  setting_info.swg_control = prefs.getInt("SWGCONTROL", SWG_CONTROL_DEFAULT);
   setting_info.swg_orp_target = prefs.getInt("SWGORPTARGET", SWG_ORP_DEFAULT);
   setting_info.swg_orp_std_dev = prefs.getFloat("SWGORSTDEVF", SWG_ORP_STD_DEV_DEFAULT);
   setting_info.swg_orp_hysteresis = prefs.getInt("SWGORPHYST", SWG_ORP_HYSTERESIS_DEFAULT);
@@ -1081,7 +1109,7 @@ void system_setting_save()
   prefs.putString("HOSTNAME", setting_info.hostname);
   prefs.putInt("ORPCALMV", setting_info.orp_cal_mV);
 
-  prefs.putInt("SWGENABLE", setting_info.swg_enable);
+  prefs.putInt("SWGCONTROL", setting_info.swg_control);
   prefs.putInt("SWGORPTARGET", setting_info.swg_orp_target);
   prefs.putFloat("SWGORSTDEVF", setting_info.swg_orp_std_dev);
   prefs.putInt("SWGORPHYST", setting_info.swg_orp_hysteresis);
@@ -1180,12 +1208,18 @@ void orp_loop()
     ord_ts = millis();
     orp_caled = 1;
     if (orp_reading == 620)
-      orp_reading = 550;
+      orp_reading = 725;
     else
-    orp_reading = 550;
+    orp_reading = 725;
 #if defined(WIFI_SUPPORT)
     // Publish only if pump is ON.
     if ((millis() - mqtt_orp_publish_ts) >= ORP_PUBLISH_TIMEMS) {
+      DBG_PRINTLN(swg_anlyzer.is_scheduled());
+      if (swg_anlyzer.is_scheduled())
+        DBG_PRINTLN("Scheduled");
+      else
+        DBG_PRINTLN("Not Scheduled");
+
       if (mqtt_is_pump_on() && swg_anlyzer.is_scheduled())
         mqtt_publish(int(orp_reading));
       else
@@ -1193,7 +1227,9 @@ void orp_loop()
       mqtt_orp_publish_ts = millis();
     }
 #endif
-    swg_anlyzer.orp_add(int(orp_reading));
+    if (mqtt_is_pump_on()) {
+      swg_anlyzer.orp_add(int(orp_reading), mqtt_swg_pct <= 0 ? 0 : 1);
+    }
   }
 #else
 
@@ -1401,7 +1437,7 @@ const char* htmlFormStart = R"rawliteral(
             padding: 0;
         }
         .form-container {
-            width: 400px;
+            width: 500px;
             margin: 50px auto;
             background-color: white;
             padding: 20px;
@@ -1549,8 +1585,8 @@ const char* htmlMqttSWGTopic = R"rawliteral(
 )rawliteral";
 
 const char* htmlMqttORAlarmPTopic = R"rawliteral(
-            <label for="orpalarmtopic">MQTT ORP Alarm Topic:</label>
-            <input type="text" id="orpalarmtopic" name="orpalarmtopic" title="Set topic for ORP alarm (based on homebridge-mqtt). Set to blank to disable. Default is 'homebridge'" value="%s" require>
+            <label for="orpalarmtopic">MQTT ORP Alarm/Control Topic:</label>
+            <input type="text" id="orpalarmtopic" name="orpalarmtopic" title="Set topic for ORP alarm/Control (based on homebridge-mqtt). Set to blank to disable. Default is 'homebridge'" value="%s" require>
 )rawliteral";
 
 const char* htmlOrpCalmV = R"rawliteral(
@@ -1602,6 +1638,12 @@ const char* htmlSWGCtrl = R"rawliteral(
             </div>
 )rawliteral";
 
+const char* htmlSWGPct = R"rawliteral(
+            <div class="form-group">
+            <label2 id="swgpcttxt" for="swgpct">SWG Percentage:</label2>
+            <input type="side" id="swgpct" name="swgpct" value="%d" required>
+            </div>
+)rawliteral";
 const char* htmlSWGPct0 = R"rawliteral(
             <div class="form-group">
             <label2 id="swgpcttxt0" for="swgpct0">ORP %d - %d mV (%%):</label2>
@@ -1719,6 +1761,13 @@ const char* htmlSchedule6 = R"rawliteral(
             </div>
 )rawliteral";
 
+const char* htmlSWGAlgInfo = R"rawliteral(
+            <div class="form-group">
+            <label2 for="swgalginfo">SWG Alg Info:</label2>
+            <p>%s<br>%s</p>
+            </div>
+)rawliteral";
+
 const char* htmlFormEnd = R"rawliteral(
             <input type="submit" value="Submit">
         </form>
@@ -1769,7 +1818,7 @@ void web_handle_root()
   snprintf(temp, sizeof(temp), htmlOrpCalmV, setting_info.orp_cal_mV);
   server.sendContent(temp);
 
-  snprintf(temp, sizeof(temp), htmlSWGCtrl, setting_info.swg_enable ? "checked" : "");
+  snprintf(temp, sizeof(temp), htmlSWGCtrl, setting_info.swg_control > 0 ? "checked" : "");
   server.sendContent(temp);
 
   snprintf(temp, sizeof(temp), htmlSWGTgt, setting_info.swg_orp_target);
@@ -1816,11 +1865,67 @@ void web_handle_root()
   }
 
   if (swg_anlyzer.get_alg_id() == 2) {
+    snprintf(temp, sizeof(temp), htmlSWGPct, setting_info.swg_orp_pct[0]);
+    server.sendContent(temp);
     snprintf(temp, sizeof(temp), htmlOrpActHrs, setting_info.swg_orp_active_time_hrs);
     server.sendContent(temp);
     snprintf(temp, sizeof(temp), htmlOrpDelayHrs, setting_info.swg_orp_delay_time_hrs);
     server.sendContent(temp);
     snprintf(temp, sizeof(temp), htmlOrpMeasHrs, setting_info.swg_orp_measure_time_hrs);
+    server.sendContent(temp);
+
+    char avg_info[100] = "";
+    char code_info[40] = "";
+    char *avg_info_ptr = avg_info;
+    int cur = swg_anlyzer.get_orp_day_curr() + 1;
+    if (cur >= TOTAL_NUM_DAYS_SAMPLE)
+      cur = 0;
+    for (int j = 0; j < TOTAL_NUM_DAYS_SAMPLE; j++) {
+      if (j < TOTAL_NUM_DAYS_SAMPLE-1)
+        sprintf(avg_info_ptr, "%d, ", swg_anlyzer.get_orp_day_avg(cur));
+      else
+        sprintf(avg_info_ptr, "%d", swg_anlyzer.get_orp_day_avg(cur));
+      avg_info_ptr += strlen(avg_info_ptr);
+      cur++;
+      if (cur >= TOTAL_NUM_DAYS_SAMPLE)
+        cur = 0;
+    }
+    switch (swg_anlyzer.get_orp_day_reason_code()) {
+    case ORP_DAY_RC_INIT:
+      sprintf(code_info, "Initializing");
+      break;
+    case ORP_DAY_RC_SCHEDULE_SWG_COMPLETE:
+      sprintf(code_info, "SWG schedule complete");
+      break;
+    case ORP_DAY_RC_SCHEDULE_SWG_WAITING:
+      sprintf(code_info, "SWG schedule next day");
+      break;
+    case ORP_DAY_RC_MEASURING:
+      sprintf(code_info, "Measure water");
+      break;
+    case ORP_DAY_RC_MEAS_COMPLETE:
+      sprintf(code_info, "Measure complete");
+      break;
+    case ORP_DAY_RC_MEAS_DELAY_FOR_DAY:
+      sprintf(code_info, "Measure today delay");
+      break;
+    case ORP_DAY_RC_MEAS_DELAY:
+      sprintf(code_info, "Measure delay");
+      break;
+    case ORP_DAY_RC_ACT_SWG_COMPLETE:
+      sprintf(code_info, "SWG activate complete");
+      break;
+    case ORP_DAY_RC_ACT_SWG:
+      sprintf(code_info, "SWG activate");
+      break;
+    case ORP_DAY_RC_DELAY_COMPLETE:
+      sprintf(code_info, "Delay complete");
+      break;
+    case ORP_DAY_RC_DELAY:
+      sprintf(code_info, "Delay");
+      break;
+    }
+    snprintf(temp, sizeof(temp), htmlSWGAlgInfo, avg_info, code_info);
     server.sendContent(temp);
   }
 
@@ -1999,7 +2104,7 @@ void web_handle_mqtt_submit()
     if (server.hasArg("orpacthrs")) {
       receivedMessage += " ";
       receivedMessage += server.arg("orpacthrs");
-      setting_info.swg_orp_active_time_hrs = atoi(server.arg("swgtime").c_str());
+      setting_info.swg_orp_active_time_hrs = atoi(server.arg("orpacthrs").c_str());
     }
     if (server.hasArg("orpdelayhrs")) {
       receivedMessage += " ";
@@ -2011,14 +2116,19 @@ void web_handle_mqtt_submit()
       receivedMessage += server.arg("orpmeashrs");
       setting_info.swg_orp_measure_time_hrs = atoi(server.arg("orpmeashrs").c_str());
     }
+    if (server.hasArg("swgpct")) {
+      receivedMessage += " ";
+      receivedMessage += server.arg("swgpct");
+      setting_info.swg_orp_pct[0] = (atoi(server.arg("swgpct").c_str()) / 5) * 5;
+    }
   }
 
   if (server.hasArg("swgctrl")) {
     receivedMessage += " SWG Enable";
-    setting_info.swg_enable = 1;
+    setting_info.swg_control = SWG_CONTROL_DEFAULT;
   } else {
     receivedMessage += " SWG Disable";
-    setting_info.swg_enable = 0;
+    setting_info.swg_control = 0;    
   }
 
   if (server.hasArg("orpalarmtopic")) {
@@ -2098,7 +2208,7 @@ void web_setup()
 
 void mqtt_msg_recv(int messageSize)
 {
-  unsigned char msg[80];
+  unsigned char msg[256];
   char topic[128];
 
   strncpy(topic, mqtt_client.messageTopic().c_str(), sizeof(topic));
@@ -2142,6 +2252,24 @@ void mqtt_msg_recv(int messageSize)
   //     uint32_t val = ntohl(*(uint32_t *) msg);
   //   setTime(val);
   // }
+
+  if (strlen(setting_info.mqtt_orp_alarm_topic) > 0) {
+    char msg_str[80];
+    sprintf(msg_str, "%s/from/set", setting_info.mqtt_orp_alarm_topic);
+    if (strcasecmp(topic, msg_str) == 0) {
+      if (strstr((char *) msg, "\"name\":\"Auto SWG\"") != NULL &&
+          strstr((char *) msg, "\"characteristic\":\"On\"") != NULL) {
+        char *msg_ptr = strstr((char *) msg, "alue\":true");
+        if (msg_ptr != NULL) {
+          setting_info.swg_control = SWG_CONTROL_DEFAULT;
+          swg_anlyzer.set_orp_pct_val(setting_info.swg_orp_pct[0]);
+        } else {
+          setting_info.swg_control = 0;
+          swg_anlyzer.set_orp_pct_val(0);
+        }
+      }
+    }
+  }
 }
 
 void mqtt_setup()
@@ -2237,6 +2365,16 @@ int mqtt_connect()
     // if (strlen(setting_info.mqtt_datetime_topic) > 0) {
     //   mqtt_client.subscribe(setting_info.mqtt_datetime_topic);
     // }
+    if (strlen(setting_info.mqtt_orp_alarm_topic) > 0) {
+      int len = strlen(setting_info.mqtt_orp_alarm_topic);
+      if (setting_info.mqtt_orp_alarm_topic[len-1] == '#') {
+        mqtt_client.subscribe(setting_info.mqtt_orp_alarm_topic);
+      } else {
+        char topic[80];
+        sprintf(topic, "%s/#", setting_info.mqtt_orp_alarm_topic);
+        mqtt_client.subscribe(topic);
+      }
+    }
     set_status_msg("MQTT subscribed");
     oled_screen_refresh = 1;
     oled_update_mqtt_connect(1);
@@ -2249,7 +2387,8 @@ int mqtt_connect()
     }
     //
     // Create ORP alarm
-    mqtt_swg_alarm_create();
+    mqtt_devices_create();
+    mqtt_swg_control_publish(setting_info.swg_control);
     return 1;
   } else {
     return 1;
@@ -2266,7 +2405,7 @@ int mqtt_publish_orp = -1;
 
 void mqtt_publish(int orp)
 {
-#if 0 
+#if !defined(SKIP_MQTT_PUBLISH)
   char msg[40];
 
   // Only publish every 15 seconds if it is the same value
@@ -2289,7 +2428,7 @@ void mqtt_publish(int orp)
 
 void mqtt_swg_publish(int pct)
 {
-#if 0 
+#if !defined(SKIP_MQTT_PUBLISH)
   char msg_topic[80];
   char msg[80];
 
@@ -2297,7 +2436,7 @@ void mqtt_swg_publish(int pct)
     return;
   }
 
-  if (!setting_info.swg_enable) {
+  if (setting_info.swg_control <= 0) {
     return;
   }
 
@@ -2314,7 +2453,7 @@ void mqtt_swg_publish(int pct)
 #endif
 }
 
-void mqtt_swg_alarm_create()
+void mqtt_devices_create()
 {
   char msg[80];
 
@@ -2324,7 +2463,12 @@ void mqtt_swg_alarm_create()
 
   sprintf(msg, "%s/to/add", setting_info.mqtt_orp_alarm_topic);
   mqtt_client.beginMessage(msg);
-  mqtt_client.print("{\"name\": \"ORP Alarm\", \"service_name\": \"ORP Alarm\", \"service\": \"Switch\"}");
+  mqtt_client.print("{\"name\":\"ORP Alarm\",\"service_name\":\"ORP Alarm\",\"service\":\"Switch\"}");
+  mqtt_client.endMessage();
+
+  sprintf(msg, "%s/to/add", setting_info.mqtt_orp_alarm_topic);
+  mqtt_client.beginMessage(msg);
+  mqtt_client.print("{\"name\":\"Auto SWG\",\"service_name\":\"Auto SWG\",\"service\":\"Switch\"}");
   mqtt_client.endMessage();
 }
 
@@ -2339,9 +2483,26 @@ void mqtt_orp_alarm_publish(int alarm)
   sprintf(msg_topic, "%s/to/set", setting_info.mqtt_orp_alarm_topic);
   mqtt_client.beginMessage(msg_topic);
   if (alarm)
-      mqtt_client.print("{\"name\": \"ORP Alarm\", \"service_name\": \"ORP Alarm\", \"characteristic\": \"On\", \"value\": true}");
+      mqtt_client.print("{\"name\":\"ORP Alarm\",\"service_name\":\"ORP Alarm\",\"characteristic\":\"On\",\"value\":true}");
   else
-      mqtt_client.print("{\"name\": \"ORP Alarm\", \"service_name\": \"ORP Alarm\", \"characteristic\": \"On\", \"value\": false}");
+      mqtt_client.print("{\"name\":\"ORP Alarm\",\"service_name\":\"ORP Alarm\",\"characteristic\":\"On\",\"value\":false}");
+  mqtt_client.endMessage();
+}
+
+void mqtt_swg_control_publish(int swg_control)
+{
+  char msg_topic[80];
+
+  if (strlen(setting_info.mqtt_orp_alarm_topic) <= 0) {
+    return;
+  }
+
+  sprintf(msg_topic, "%s/to/set", setting_info.mqtt_orp_alarm_topic);
+  mqtt_client.beginMessage(msg_topic);
+  if (swg_control <= 0)
+    mqtt_client.print("{\"name\":\"Auto SWG\",\"service_name\":\"Auto SWG\",\"characteristic\":\"On\",\"value\":false}");
+  else
+    mqtt_client.print("{\"name\":\"Auto SWG\",\"service_name\":\"Auto SWG\",\"characteristic\":\"On\",\"value\":true}");
   mqtt_client.endMessage();
 }
 
