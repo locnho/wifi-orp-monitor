@@ -5,11 +5,13 @@ This project provides a WiFi Pool ORP Monitor device using the following parts:
   * Seeed Studio XIAO ESP32C6 with WiFi support external antenna
   * 0.96" LCD Display
   * Rotary Switch
-  * Atlas Lab Grade ORP Probe
+  * Atlas Lab Grade GOLD ORP Probe
   * Atlas EZO ORP Circuit Board
   * Atlas EZO Carrier Board
   * Custom connection board to connect them
   * 3D print housing with nylon 2.5mm hex spacer/screws
+
+**IMPORTANT:** For salt water pool, you must use the GOLD ORP type probe.
 
 The device will send ORP reading from Atlas probe to a MQTT broker. By default it is configured to send ORP reading to AquaLinkD ORP. Though, you should be able to publish any message to MQTT broker.
 
@@ -63,22 +65,23 @@ If your ORP calibration solution isn't 225 mV, change the ORP calibration value.
 
 If you want this device to control the SWG percentage, check the box "Enable SWG Change:".
 
-The ORP value is computed using the mean of "SWG Sample Time" sample. Each second is a sample. If the standard deviation is more than the specified value, then ignore the reading. This ensures a stable ORP reading value.
+The Auto SWG algorithm is as follow:
 
-If the compute ORP value is above "SWG Target mV" - "SWG Hysteresis mV", then set SWG to 0%.
+ 1. Delay for specified hours. This is configured via "SWG Control Delay Time (hrs)".
+ 2. Measure the ORP for at least specified hours. This is configured via "SWG Control Measure Time (hrs)". Until there is this specified measured time, the sample is not consider valid.
+ 3. After the sample is measured for specified hours, compute the sample average for that day.
+ 4. If the sample is below ORP target, schedule the SWG for next day.
+ 5. Once the avarge sample for that day is below specified target, schedule the SWG for next day.
+ 6. Run the SWG at specified percentage for specified time.
 
-If the compute ORP value is within the range as shown in the figure below, set the SWG percent to the configured value.
-
-If ORP value below the configured range, then set the SWG to 0%.
-
-If you want to enable scheduling, set the "MQTT Date Topic" and configure the week day schedule accordingly. The value in this topic is the number of second since 1970 as an big endian unsigned integer. This is posted by this project https://github.com/locnho/chem-feeder-mqtt.
+Given that the algorithm is based on day average, a date is required. The date is acquired using the NTP server. You must configures the NTP server and time zone.
 
 <img src="images/orp_monitor_config.png" width="256"/>
 
 <img src="images/orp_schedule.png" width="256"/>
 
 
-# How To Calibrate ORP Probe
+# How To Calibrate GOLD ORP Probe
 
 To calibrate ORP probe, perform these steps:
 
@@ -99,19 +102,32 @@ The "MQTT" indicates that it is connected to a MQTT broker.
 
 The first line reading shows:
 
-  * ORP reading as from Atlas probe
+  * ORP reading as from Atlas GOLD probe
   * Percentage of the SWG (if enabled support)
 
 The second line reading shows:
 
   * ORP reading as computed
   * SWG percent this device configured the SWG via MQTT
+  * Status code of the Auto SWG
 
-If the computed ORP reading deviated more than the set standard deviation, "Alarm" will be show instead the SWG percentage.
+The Status code of the Auto SWG are:
 
+  * I - Initializing
+  * D - Delay in-progress
+  * S - Scheduling Auto SWG for next day
+  * M - Measuring the ORP (per day) 
+  * A - Auto SWG is active at specified percentage
 
 The screen will turn off after some idle time. Press the button to show the screen.
 
 Here is an image as reported via AquaLinkD.
 
 <img src="images/orp_aqualinkd.png" width="256"/>
+
+If you want to disable 'Auto SWG', you can do the following:
+
+  1. Disable via the web site configuration
+  2. Disable via the MQTT Homebridge device or HomeKit using the 'Auto SWG'
+
+Please note when disable from 'Auto SWG', it does not persist across a power cycle.
