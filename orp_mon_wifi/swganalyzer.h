@@ -110,6 +110,10 @@ public:
   void set_orp_pct_val(int orp_pct_val) { orp_pct[0] = orp_pct_val; }
   char get_orp_code_char_str();
 
+  float get_remain_active_hrs();
+  float get_remain_delay_hrs();
+  float get_remain_measure_hrs();
+
 protected:
   //
   // 7 day scheduling

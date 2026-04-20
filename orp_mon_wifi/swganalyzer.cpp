@@ -34,7 +34,6 @@ void SWGAnalyzer::setup()
   orp_target = 0;
   last_orp = 0;
   last_orp_pct = 0;
-  alarm = 0;
 
   date_check = 0;
   for (int i = 0; i < 7; i++) {
@@ -340,6 +339,8 @@ int SWGAnalyzerv2::get_swg_pct(bool swg_active)
     orp_day_state = ORP_DAY_STATE_DELAY;
     last_orp_pct = 0;
     orp_day_reason_code = ORP_DAY_RC_INIT;
+    if (swg_active)
+      return -1;
     return last_orp_pct;
   case ORP_DAY_STATE_ACTIVE_SWG:
     if (orp_day_swg_active_time_valid) {
@@ -364,7 +365,12 @@ int SWGAnalyzerv2::get_swg_pct(bool swg_active)
     last_orp_pct = orp_pct[0];
     return last_orp_pct;
   case ORP_DAY_STATE_DELAY:
-    if (ms_time - orp_day_delay_ts_ms >= orp_day_cfg_delay_time_ms) {
+    if (swg_active) {
+      //
+      // If SWG active, start delay from the beginning again.
+      orp_day_delay_ts_ms = ms_time;
+      orp_day_reason_code = ORP_DAY_RC_DELAY;
+    } else if (ms_time - orp_day_delay_ts_ms >= orp_day_cfg_delay_time_ms) {
       orp_day_state = ORP_DAY_STATE_MEASURE;
       orp_day_measure_time_valid = 0;
       orp_day_reason_code = ORP_DAY_RC_DELAY_COMPLETE;
@@ -372,21 +378,32 @@ int SWGAnalyzerv2::get_swg_pct(bool swg_active)
       orp_day_reason_code = ORP_DAY_RC_DELAY;
     }
     last_orp_pct = 0;
+    if (swg_active)
+      return -1;
     return last_orp_pct;
   case ORP_DAY_STATE_MEASURE:
   default:
-    if (orp_day_measure_time_valid) {
+    last_orp_pct = 0;
+
+    if (swg_active) {
+      //
+      // If SWG active, start delay from the beginning again.
+      orp_day_state = ORP_DAY_STATE_DELAY;
+      orp_day_delay_ts_ms = ms_time;
+      orp_day_reason_code = ORP_DAY_STATE_DELAY;
+      return -1;
+   }
+
+   if (orp_day_measure_time_valid) {
       delta_ms = ms_time - orp_day_measure_time_st;
-      orp_day_measure_time_st = ms_time;
     } else {
       orp_day_measure_time_valid = 1;
-      orp_day_measure_time_st = ms_time;
       orp_day_measure_time_ms = 0;
       delta_ms = 0;
     }
+    orp_day_measure_time_st = ms_time;
     orp_day_measure_time_ms += delta_ms;
 
-    last_orp_pct = 0;
     if (orp_day_measure_time_ms <= orp_day_cfg_measure_time_ms * 0.75) {
       orp_day_reason_code = ORP_DAY_RC_MEAS_DELAY;
       return last_orp_pct;
@@ -416,6 +433,8 @@ int SWGAnalyzerv2::get_swg_pct(bool swg_active)
       orp_day_reason_code = ORP_DAY_RC_SCHEDULE_SWG_WAITING;
     }
     last_orp_pct = 0;
+    if (swg_active)
+      return -1;
     return last_orp_pct;
   }
 }
@@ -447,4 +466,35 @@ char SWGAnalyzerv2::get_orp_code_char_str()
   case ORP_DAY_RC_DELAY:
     return 'D';
   }
+}
+
+float SWGAnalyzerv2::get_remain_active_hrs()
+{
+  float val = (orp_day_cfg_swg_time_ms - orp_day_swg_active_time_ms)/(1000*60*60.0);
+  if (val < 0)
+    return 0.0;
+  return val;
+}
+
+float SWGAnalyzerv2::get_remain_delay_hrs()
+{
+  unsigned long ms_time = millis_cb ? millis_cb() : 0;
+  unsigned long t = ms_time - orp_day_delay_ts_ms;
+
+  if (t >= orp_day_cfg_delay_time_ms)
+    return 0.0;
+  return (orp_day_cfg_delay_time_ms - t)/(1000*60*60.0);
+}
+
+float SWGAnalyzerv2::get_remain_measure_hrs()
+{
+  float val = 0.0;
+
+  if (orp_day_measure_time_ms <= orp_day_cfg_measure_time_ms * 0.75)
+    val = (orp_day_cfg_measure_time_ms - orp_day_measure_time_ms)/(1000*60*60.0);
+  if (orp_day_measured_time[orp_day_curr] <= orp_day_cfg_measure_time_ms * 0.75)
+    val = (orp_day_cfg_measure_time_ms - orp_day_measured_time[orp_day_curr])/(1000*60*60.0);
+  if (val < 0)
+    return 0.0;
+  return val;
 }

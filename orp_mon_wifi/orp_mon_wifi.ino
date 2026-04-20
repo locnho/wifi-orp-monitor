@@ -212,6 +212,8 @@ unsigned long mqtt_connect_ts = 0;
 int mqtt_connect_first_time = 1;
 int mqtt_pump_state = -1;
 int mqtt_swg_pct = -1;
+unsigned long mqtt_autoswg_ts = 0;
+int mqtt_autoswg_ts_valid = 0;
 
 //
 // Serial Setup
@@ -263,7 +265,8 @@ void rotary_button_setup()
 // Data Samples Statistic
 ///////////////////////////////////////////////////////////////////////////////
 #include "swganalyzer.h"
-unsigned long orp_swg_ctl_chk_ts;
+unsigned long orp_swg_ctl_chk_ts = 0;
+int orp_swg_ctl_chk_ts_valid = 0;
 SWGAnalyzerv2 swg_anlyzer;
 
 struct tm *my_localtime()
@@ -309,11 +312,15 @@ void orp_swg_ctrl_loop()
 {
   int swg_pct;
 
-  if ((millis() - orp_swg_ctl_chk_ts) <= 60000) {
+  if (!orp_swg_ctl_chk_ts_valid) {
+    orp_swg_ctl_chk_ts = millis();
+    orp_swg_ctl_chk_ts_valid = 1;
+  } else if ((millis() - orp_swg_ctl_chk_ts) <= 60000) {
     return;
   }
 
   if (!swg_anlyzer.is_scheduled()) {
+    mqtt_aswg_active_publish(0);
     return;
   }
 
@@ -322,6 +329,7 @@ void orp_swg_ctrl_loop()
   if (swg_pct >= 0) {
     swg_set(swg_pct);
   }
+  mqtt_aswg_active_publish(swg_pct > 0 ? 1 : 0);
   orp_swg_ctl_chk_ts = millis();
 }
 
@@ -1907,22 +1915,22 @@ void web_handle_root()
       sprintf(code_info, "Measure complete");
       break;
     case ORP_DAY_RC_MEAS_DELAY_FOR_DAY:
-      sprintf(code_info, "Measure today delay");
+      sprintf(code_info, "Measure today delay (%0.1f)", swg_anlyzer.get_remain_measure_hrs());
       break;
     case ORP_DAY_RC_MEAS_DELAY:
-      sprintf(code_info, "Measure delay");
+      sprintf(code_info, "Measure delay (%0.1f)", swg_anlyzer.get_remain_measure_hrs());
       break;
     case ORP_DAY_RC_ACT_SWG_COMPLETE:
       sprintf(code_info, "SWG activate complete");
       break;
     case ORP_DAY_RC_ACT_SWG:
-      sprintf(code_info, "SWG activate");
+      sprintf(code_info, "SWG activate (%0.1f)", swg_anlyzer.get_remain_active_hrs());
       break;
     case ORP_DAY_RC_DELAY_COMPLETE:
       sprintf(code_info, "Delay complete");
       break;
     case ORP_DAY_RC_DELAY:
-      sprintf(code_info, "Delay");
+      sprintf(code_info, "Delay (%0.1f)", swg_anlyzer.get_remain_delay_hrs());
       break;
     }
     snprintf(temp, sizeof(temp), htmlSWGAlgInfo, avg_info, code_info);
@@ -2254,9 +2262,16 @@ void mqtt_msg_recv(int messageSize)
   // }
 
   if (strlen(setting_info.mqtt_orp_alarm_topic) > 0) {
+    int match = 0;
+
     char msg_str[80];
+    sprintf(msg_str, "%s/to/set", setting_info.mqtt_orp_alarm_topic);
+    if (strcasecmp(topic, msg_str) == 0)
+      match = 1;
     sprintf(msg_str, "%s/from/set", setting_info.mqtt_orp_alarm_topic);
-    if (strcasecmp(topic, msg_str) == 0) {
+    if (strcasecmp(topic, msg_str) == 0)
+      match = 1;
+    if (match) {
       if (strstr((char *) msg, "\"name\":\"Auto SWG\"") != NULL &&
           strstr((char *) msg, "\"characteristic\":\"On\"") != NULL) {
         char *msg_ptr = strstr((char *) msg, "alue\":true");
@@ -2298,6 +2313,14 @@ void mqtt_loop()
 
   if (mqtt_client.connected()) {
     mqtt_client.poll();
+    if (!mqtt_autoswg_ts_valid) {
+      mqtt_autoswg_ts = millis();
+      mqtt_autoswg_ts_valid = 1;
+      mqtt_swg_control_publish(setting_info.swg_control);
+    } else if ((millis() - mqtt_autoswg_ts) > 15000) {
+      mqtt_autoswg_ts = millis();
+      mqtt_swg_control_publish(setting_info.swg_control);
+    }
   }
 
   if (mqtt_connect_first_time && !mqtt_client.connected()) {
@@ -2389,6 +2412,8 @@ int mqtt_connect()
     // Create ORP alarm
     mqtt_devices_create();
     mqtt_swg_control_publish(setting_info.swg_control);
+    mqtt_autoswg_ts = millis();
+    mqtt_autoswg_ts_valid = 1;
     return 1;
   } else {
     return 1;
@@ -2470,6 +2495,11 @@ void mqtt_devices_create()
   mqtt_client.beginMessage(msg);
   mqtt_client.print("{\"name\":\"Auto SWG\",\"service_name\":\"Auto SWG\",\"service\":\"Switch\"}");
   mqtt_client.endMessage();
+
+  sprintf(msg, "%s/to/add", setting_info.mqtt_orp_alarm_topic);
+  mqtt_client.beginMessage(msg);
+  mqtt_client.print("{\"name\":\"ASWG Active\",\"service_name\":\"ASWG Active\",\"service\":\"Switch\"}");
+  mqtt_client.endMessage();
 }
 
 void mqtt_orp_alarm_publish(int alarm)
@@ -2503,6 +2533,23 @@ void mqtt_swg_control_publish(int swg_control)
     mqtt_client.print("{\"name\":\"Auto SWG\",\"service_name\":\"Auto SWG\",\"characteristic\":\"On\",\"value\":false}");
   else
     mqtt_client.print("{\"name\":\"Auto SWG\",\"service_name\":\"Auto SWG\",\"characteristic\":\"On\",\"value\":true}");
+  mqtt_client.endMessage();
+}
+
+void mqtt_aswg_active_publish(int active)
+{
+  char msg_topic[80];
+
+  if (strlen(setting_info.mqtt_orp_alarm_topic) <= 0) {
+    return;
+  }
+
+  sprintf(msg_topic, "%s/to/set", setting_info.mqtt_orp_alarm_topic);
+  mqtt_client.beginMessage(msg_topic);
+  if (active <= 0)
+    mqtt_client.print("{\"name\":\"ASWG Active\",\"service_name\":\"ASWG Active\",\"characteristic\":\"On\",\"value\":false}");
+  else
+    mqtt_client.print("{\"name\":\"ASWG Active\",\"service_name\":\"ASWG Active\",\"characteristic\":\"On\",\"value\":true}");
   mqtt_client.endMessage();
 }
 
