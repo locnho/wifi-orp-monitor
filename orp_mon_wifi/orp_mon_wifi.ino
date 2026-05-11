@@ -54,7 +54,7 @@
   #define MQTT_PRINTLN(x)
 #endif
 
-#define FW_VERSION    "0.5"
+#define FW_VERSION    "0.6"
 
 //
 // Rotary and Button
@@ -139,6 +139,7 @@ typedef struct {
   int orp_cal_mV;
   int swg_control;          // 0 - disable; all other - enable
   int swg_orp_target;
+  int swg_orp_target_max;
   int swg_orp_hysteresis;
   float swg_orp_std_dev;
   int swg_orp_interval;
@@ -177,6 +178,8 @@ typedef struct {
 #define END_SCHEDULE_DEFAULT      (15*60*60)
 #define NTP_SERVER_DEFAULT        "pool.ntp.org"
 #define NTP_TZ_DEFAULT            "PST8PDT,M3.2.0,M11.1.0"
+#define NTP_EPOCH_YEAR_OFFSET     1900
+
 Setting_Info setting_info;
 
 char mqtt_pump_topic_match[64];
@@ -267,7 +270,7 @@ void rotary_button_setup()
 #include "swganalyzer.h"
 unsigned long orp_swg_ctl_chk_ts = 0;
 int orp_swg_ctl_chk_ts_valid = 0;
-SWGAnalyzerv2 swg_anlyzer;
+SWGAnalyzerv3 swg_anlyzer;
 
 struct tm *my_localtime()
 {
@@ -293,9 +296,11 @@ void orp_data_setup()
     swg_anlyzer.setup_alg(setting_info.swg_data_sample_time_sec, setting_info.swg_orp_std_dev, setting_info.swg_orp_target,
                           setting_info.swg_orp_hysteresis, setting_info.swg_orp_interval, setting_info.swg_orp_guard,
                           setting_info.swg_orp_pct);
-  else
+  else if (swg_anlyzer.get_alg_id() == 2)
     swg_anlyzer.setup_alg(setting_info.swg_orp_target, setting_info.swg_orp_active_time_hrs, setting_info.swg_orp_delay_time_hrs,
                           setting_info.swg_orp_measure_time_hrs, setting_info.swg_control > 0 ? setting_info.swg_orp_pct[0] : 0);
+  else
+    swg_anlyzer.setup_alg(setting_info.swg_orp_target, setting_info.swg_orp_target_max, setting_info.swg_orp_measure_time_hrs, setting_info.swg_control > 0 ? setting_info.swg_orp_pct[0] : 0);
 
   for (int i = 0; i < 7; i++) {
     swg_anlyzer.set_schedule(i, setting_info.start_schedule[i], setting_info.end_schedule[i]);
@@ -320,11 +325,12 @@ void orp_swg_ctrl_loop()
   }
 
   if (!swg_anlyzer.is_scheduled()) {
+    orp_swg_ctl_chk_ts = millis();
     mqtt_aswg_active_publish(0);
     return;
   }
 
-  swg_pct = swg_anlyzer.get_swg_pct(mqtt_swg_pct <= 0 ? 0 : 1);
+  swg_pct = swg_anlyzer.get_swg_pct(mqtt_swg_pct);
   mqtt_orp_alarm_publish(swg_anlyzer.is_alarmed());
   if (swg_pct >= 0) {
     swg_set(swg_pct);
@@ -519,8 +525,8 @@ void oled_status_alive_update(int show_status = 1)
     const time_t time_val_sec = time(NULL);
     struct tm time_tm = *localtime(&time_val_sec);
 
-    if (time_tm.tm_year + 1970 > 2000) {
-      sprintf(msg, "%02d/%02d/%04d %02d:%02d:%02d", time_tm.tm_mon + 1, time_tm.tm_mday, time_tm.tm_year + 1970, time_tm.tm_hour, time_tm.tm_min, time_tm.tm_sec);
+    if (time_tm.tm_year + NTP_EPOCH_YEAR_OFFSET > 2000) {
+      sprintf(msg, "%02d/%02d/%04d %02d:%02d:%02d", time_tm.tm_mon + 1, time_tm.tm_mday, time_tm.tm_year + NTP_EPOCH_YEAR_OFFSET, time_tm.tm_hour, time_tm.tm_min, time_tm.tm_sec);
       u8g2.drawStr(0, 63, msg);
     }
   }
@@ -562,8 +568,8 @@ void oled_title_update_print()
     const time_t time_val_sec = time(NULL);
     struct tm time_tm = *localtime(&time_val_sec);
 
-    if (time_tm.tm_year + 1900 > 2000) {
-      sprintf(msg, "%02d/%02d/%04d %02d:%02d:%02d ", time_tm.tm_mon + 1, time_tm.tm_mday, time_tm.tm_year + 1900, time_tm.tm_hour, time_tm.tm_min, time_tm.tm_sec);
+    if (time_tm.tm_year + NTP_EPOCH_YEAR_OFFSET > 2000) {
+      sprintf(msg, "%02d/%02d/%04d %02d:%02d:%02d ", time_tm.tm_mon + 1, time_tm.tm_mday, time_tm.tm_year + NTP_EPOCH_YEAR_OFFSET, time_tm.tm_hour, time_tm.tm_min, time_tm.tm_sec);
       STATUS_PRINT("NTP ");
       STATUS_PRINT(msg);
     } else {
@@ -981,6 +987,7 @@ void system_setting_clear()
   setting_info.signature1 = SIGNATURE1;
   setting_info.signature2 = SIGNATURE2;
   setting_info.swg_orp_target = SWG_ORP_DEFAULT;
+  setting_info.swg_orp_target_max = SWG_ORP_MAX_DEFAULT;
   setting_info.swg_orp_hysteresis = SWG_ORP_HYSTERESIS_DEFAULT;
   setting_info.swg_orp_std_dev = SWG_ORP_STD_DEV_DEFAULT;
   setting_info.swg_orp_interval = SWG_ORP_INTERVAL_DEFAULT;
@@ -1048,6 +1055,7 @@ void system_setting_init()
 
   setting_info.swg_control = prefs.getInt("SWGCONTROL", SWG_CONTROL_DEFAULT);
   setting_info.swg_orp_target = prefs.getInt("SWGORPTARGET", SWG_ORP_DEFAULT);
+  setting_info.swg_orp_target_max = prefs.getInt("SWGORPTARGETMAX", SWG_ORP_MAX_DEFAULT);
   setting_info.swg_orp_std_dev = prefs.getFloat("SWGORSTDEVF", SWG_ORP_STD_DEV_DEFAULT);
   setting_info.swg_orp_hysteresis = prefs.getInt("SWGORPHYST", SWG_ORP_HYSTERESIS_DEFAULT);
   setting_info.swg_orp_interval = prefs.getInt("SWGORPINTERVAL", SWG_ORP_INTERVAL_DEFAULT);
@@ -1119,6 +1127,7 @@ void system_setting_save()
 
   prefs.putInt("SWGCONTROL", setting_info.swg_control);
   prefs.putInt("SWGORPTARGET", setting_info.swg_orp_target);
+  prefs.putInt("SWGORPTARGETMAX", setting_info.swg_orp_target_max);
   prefs.putFloat("SWGORSTDEVF", setting_info.swg_orp_std_dev);
   prefs.putInt("SWGORPHYST", setting_info.swg_orp_hysteresis);
   prefs.putInt("SWGORPINTERVAL", setting_info.swg_orp_interval);
@@ -1429,6 +1438,7 @@ bool mqtt_subscribed = 0;
 #define HTTP_PORT   80
 WebServer server(HTTP_PORT);
 String receivedMessage = "";
+unsigned long receivedMessage_ts = 0;
 
 const char* htmlFormStart = R"rawliteral(
 <!DOCTYPE html>
@@ -1607,7 +1617,14 @@ const char* htmlOrpCalmV = R"rawliteral(
 const char* htmlSWGTgt = R"rawliteral(
             <div class="form-group">
             <label2 for="swgtarget">SWG Target mV:</label2>
-            <input type="side" id="swgtarget" name="swgtarget" onchange="updateField()" title="Default is 700" value="%d" required>
+            <input type="side" id="swgtarget" name="swgtarget" onchange="updateField()" title="SWG enable if below this value. Default is 700" value="%d" required>
+            </div>
+)rawliteral";
+
+const char* htmlSWGTgtMax = R"rawliteral(
+            <div class="form-group">
+            <label2 for="swgtargetmax">SWG Target Max mV:</label2>
+            <input type="side" id="swgtargetmax" name="swgtargetmax" onchange="updateField()" title="SWG disable if above this value. Default is 725" value="%d" required>
             </div>
 )rawliteral";
 
@@ -1710,7 +1727,7 @@ const char* htmlMqttDTTopic = R"rawliteral(
 )rawliteral";
 
 const char* htmlNtpServer = R"rawliteral(
-            <label for="ntpseerver">NTP Server:</label>
+            <label for="ntpseerver">NTP Server (%s):</label>
             <input type="text" id="ntpseerver" name="ntpseerver" title="NTP server. Leave blank to disable. Default is pool.ntp.org." value="%s">
 )rawliteral";
 
@@ -1832,6 +1849,11 @@ void web_handle_root()
   snprintf(temp, sizeof(temp), htmlSWGTgt, setting_info.swg_orp_target);
   server.sendContent(temp);
 
+  if (swg_anlyzer.get_alg_id() == 3) {
+    snprintf(temp, sizeof(temp), htmlSWGTgtMax, setting_info.swg_orp_target_max);
+    server.sendContent(temp);
+  }
+
   if (swg_anlyzer.get_alg_id() == 1) {
     snprintf(temp, sizeof(temp), htmlSWGHyst, setting_info.swg_orp_hysteresis);
     server.sendContent(temp);
@@ -1872,13 +1894,17 @@ void web_handle_root()
     server.sendContent(temp);
   }
 
-  if (swg_anlyzer.get_alg_id() == 2) {
+  if (swg_anlyzer.get_alg_id() == 2 || swg_anlyzer.get_alg_id() == 3) {
     snprintf(temp, sizeof(temp), htmlSWGPct, setting_info.swg_orp_pct[0]);
     server.sendContent(temp);
+  }
+  if (swg_anlyzer.get_alg_id() == 2) {
     snprintf(temp, sizeof(temp), htmlOrpActHrs, setting_info.swg_orp_active_time_hrs);
     server.sendContent(temp);
     snprintf(temp, sizeof(temp), htmlOrpDelayHrs, setting_info.swg_orp_delay_time_hrs);
     server.sendContent(temp);
+  }
+  if (swg_anlyzer.get_alg_id() == 2 || swg_anlyzer.get_alg_id() == 3) {
     snprintf(temp, sizeof(temp), htmlOrpMeasHrs, setting_info.swg_orp_measure_time_hrs);
     server.sendContent(temp);
 
@@ -1944,7 +1970,15 @@ void web_handle_root()
 
   // snprintf(temp, sizeof(temp), htmlMqttDTTopic, setting_info.mqtt_datetime_topic);
   // server.sendContent(temp);
-  snprintf(temp, sizeof(temp), htmlNtpServer, setting_info.ntp_server);
+  const time_t time_val_sec = time(NULL);
+  struct tm time_tm = *localtime(&time_val_sec);
+
+  if (time_tm.tm_year + NTP_EPOCH_YEAR_OFFSET <= 2000) {
+    strcpy(val1, "01/01/2000");
+  } else { 
+    sprintf(val1, "%02d/%02d/%04d", time_tm.tm_mon + 1, time_tm.tm_mday, time_tm.tm_year + NTP_EPOCH_YEAR_OFFSET);
+  }
+  snprintf(temp, sizeof(temp), htmlNtpServer, val1, setting_info.ntp_server);
   server.sendContent(temp);
   snprintf(temp, sizeof(temp), htmlNtpTz, setting_info.ntp_tz);
   server.sendContent(temp);
@@ -1990,6 +2024,9 @@ void web_handle_root()
   val = setting_info.end_schedule[6]; hr = val / (60*60); val -= hr * 60 * 60; minute = val / 60; val -= minute * 60; second = val;
   sprintf(val2, "%02d:%02d:%02d", hr, minute, second);
   snprintf(temp, sizeof(temp), htmlSchedule6, val1, val2); server.sendContent(temp);
+
+  if (receivedMessage.length() > 0 && (millis() - receivedMessage_ts) >= 10*60*1000)
+    receivedMessage = "";
 
   snprintf(temp, sizeof(temp), htmlFormEnd, receivedMessage.c_str());
   server.sendContent(temp);
@@ -2076,6 +2113,12 @@ void web_handle_mqtt_submit()
     setting_info.swg_orp_target = atoi(server.arg("swgtarget").c_str());
   }
 
+  if (server.hasArg("swgtargetmax")) {
+    receivedMessage += " ";
+    receivedMessage += server.arg("swgtargetmax");
+    setting_info.swg_orp_target_max = atoi(server.arg("swgtargetmax").c_str());
+  }
+
   if (swg_anlyzer.get_alg_id() == 1) {
     if (server.hasArg("swghysteresis")) {
       receivedMessage += " ";
@@ -2106,6 +2149,13 @@ void web_handle_mqtt_submit()
         setting_info.swg_orp_pct[i] = atoi(server.arg(tag).c_str());
       }
     }
+  }
+  if (swg_anlyzer.get_alg_id() == 2 || swg_anlyzer.get_alg_id() == 3) {
+      if (server.hasArg("swgpct")) {
+        receivedMessage += " ";
+        receivedMessage += server.arg("swgpct");
+        setting_info.swg_orp_pct[0] = atoi(server.arg("swgpct").c_str());
+      }
   }
 
   if (swg_anlyzer.get_alg_id() == 2) {
@@ -2191,6 +2241,7 @@ void web_handle_mqtt_submit()
       }
     }
   }
+  receivedMessage_ts = millis();
 
   DBG_PRINT("Received message: ");
   DBG_PRINTLN(receivedMessage);

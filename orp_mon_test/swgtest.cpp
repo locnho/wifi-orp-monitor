@@ -20,7 +20,7 @@
 
 using namespace std;
 
-SWGAnalyzerv2 swg_anlyzer;
+SWGAnalyzerv3 swg_anlyzer;
 vector<vector<string>> orp_data;
 
 int read_data()
@@ -84,7 +84,8 @@ int main(int argc, char *argv[])
   char tstamp[80];
   swg_anlyzer.set_time_functions(my_millis, my_localtime);
   swg_anlyzer.setup();
-  swg_anlyzer.setup_alg(690, 3, 3 * 24, 5, 90);
+  swg_anlyzer.setup_alg(700, 720, 5, 20);
+
   for (int i = 0; i < 7; i++) {
     swg_anlyzer.set_schedule(i, 0, 60*60*24);
   }
@@ -95,8 +96,8 @@ int main(int argc, char *argv[])
 
   struct tm time_start_dt = {}; // Initialize to zero
   time_start_dt.tm_year = 2026 - 1900; // 2026
-  time_start_dt.tm_mon = 3 - 1;        // March
-  time_start_dt.tm_mday = 29;          // 29th
+  time_start_dt.tm_mon = 4 - 1;        // March
+  time_start_dt.tm_mday = 22;          // 29th
   time_start_dt.tm_hour = 0;
   time_start_dt.tm_min = 0;
   time_start_dt.tm_sec = 0;

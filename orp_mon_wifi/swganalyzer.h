@@ -13,6 +13,7 @@
 #define SWG_ORP_PCT3_DEFAULT        75
 #define SWG_ORP_PCT4_DEFAULT        100
 #define SWG_DATA_SAMPLE_TIME_SEC_DEFAULT (5*60)
+#define SWG_ORP_MAX_DEFAULT         720
 
 class SWGAnalyzer {
 public:
@@ -20,7 +21,7 @@ public:
   void setup();
   void setup_alg(int sample_time_sec, float std_dev, int orp_target_val, int orp_target_hysteresis_val, int orp_target_interval, int orp_target_guard, int orp_pct_val[5]);
   void orp_add(int val,  bool swg_active);
-  int get_swg_pct(bool swg_active);
+  int get_swg_pct(int curr_swg_pct);
   int get_alg_id() { return 1; }
 
   int get_orp_target() { return orp_target; }
@@ -39,6 +40,7 @@ protected:
   struct tm * (*localtime_cb)();
 
   int orp_target;
+  int orp_target_max;
   int last_orp;
   int last_orp_pct;
   int alarm;
@@ -90,6 +92,8 @@ protected:
 #define ORP_DAY_RC_ACT_SWG                  9
 #define ORP_DAY_RC_DELAY_COMPLETE           10
 #define ORP_DAY_RC_DELAY                    11
+
+
 #define TOTAL_NUM_DAYS_SAMPLE               7
 
 class SWGAnalyzerv2 : public SWGAnalyzer {
@@ -99,7 +103,7 @@ public:
   void setup_alg(int orp_day_cfg_target_val, int orp_day_cfg_swg_time_hours, int orp_day_cfg_delay_time_hours, int orp_day_cfg_measure_time_hours, int orp_pct_val);
   void setup_alg(int sample_time_sec, float std_dev, int orp_target_val, int orp_target_hysteresis_val, int orp_target_interval, int orp_target_guard, int orp_pct_val[5]);
   void orp_add(int val,  bool swg_active);
-  int get_swg_pct(bool swg_active);
+  int get_swg_pct(int curr_swg_pct);
   int get_alg_id() { return 2; }
 
   int get_orp_day_avg(int day) { return orp_day_avg[day]; }
@@ -140,6 +144,17 @@ protected:
   unsigned long orp_day_cfg_measure_time_ms;
   int orp_day_schedule_day;
   int orp_day_reason_code;
+};
+
+class SWGAnalyzerv3 : public SWGAnalyzerv2 {
+public:
+  SWGAnalyzerv3();
+  void setup_alg(int orp_day_cfg_target_val, int orp_day_max_cfg_target_val, int orp_day_cfg_measure_time_hours, int orp_pct_val);
+  void setup_alg(int orp_day_cfg_target_val, int orp_day_cfg_swg_time_hours, int orp_day_cfg_delay_time_hours, int orp_day_cfg_measure_time_hours, int orp_pct_val) { }
+  void setup_alg(int sample_time_sec, float std_dev, int orp_target_val, int orp_target_hysteresis_val, int orp_target_interval, int orp_target_guard, int orp_pct_val[5]) { }
+  int get_alg_id() { return 3; }
+  int get_swg_pct(int curr_swg_pct);
+
 };
 
 #endif
