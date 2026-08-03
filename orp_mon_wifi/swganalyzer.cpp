@@ -505,13 +505,15 @@ float SWGAnalyzerv2::get_remain_measure_hrs()
 SWGAnalyzerv3::SWGAnalyzerv3()
 {
   SWGAnalyzerv2::setup();
-  setup_alg(SWG_ORP_DEFAULT, SWG_ORP_MAX_DEFAULT, SWG_ORP_MEASURE_TIME_HRS_DEFAULT, SWG_ORP_PCT0_DEFAULT);
+  SWGAnalyzerv3::setup_alg(SWG_ORP_DEFAULT, SWG_ORP_MAX_DEFAULT, SWG_ORP_MEASURE_TIME_START_DEFAULT, SWG_ORP_MEASURE_TIME_END_DEFAULT, SWG_ORP_PCT0_DEFAULT);
 }
 
-void SWGAnalyzerv3::setup_alg(int orp_day_cfg_target_val, int orp_day_max_cfg_target_val, int orp_day_cfg_measure_time_hours, int orp_pct_val)
+void SWGAnalyzerv3::setup_alg(int orp_day_cfg_target_val, int orp_day_max_cfg_target_val, int orp_day_cfg_measure_time_start, int orp_day_cfg_measure_time_end, int orp_pct_val)
 {
-  SWGAnalyzerv2::setup_alg(orp_day_cfg_target_val, 0, 0, orp_day_cfg_measure_time_hours, orp_pct_val);
+  SWGAnalyzerv2::setup_alg(orp_day_cfg_target_val, 0, 0, (orp_day_cfg_measure_time_end - orp_day_cfg_measure_time_start) / 3600, orp_pct_val);
   orp_target_max = orp_day_max_cfg_target_val;
+  swg_start_time = orp_day_cfg_measure_time_start;
+  swg_end_time = orp_day_cfg_measure_time_end;
 }
 
 int SWGAnalyzerv3::get_swg_pct(int curr_swg_pct)
@@ -609,4 +611,20 @@ int SWGAnalyzerv3::get_swg_pct(int curr_swg_pct)
       return -1;
     return last_orp_pct;
   }
+}
+
+void SWGAnalyzerv3::orp_add(int val,  bool swg_active)
+{
+  if (!date_check)
+    return;
+
+  if (localtime_cb == NULL)
+    return;
+
+  struct tm time_tm = *localtime_cb();
+
+  unsigned int tm_sec= time_tm.tm_hour * 60 * 60 + time_tm.tm_min * 60 + time_tm.tm_sec;
+  if ((swg_start_time == 0 && swg_end_time == 0) || 
+      (tm_sec >= swg_start_time && tm_sec <= swg_end_time))
+      SWGAnalyzerv2::orp_add(val, swg_active);
 }

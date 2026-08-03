@@ -84,24 +84,30 @@ int main(int argc, char *argv[])
   char tstamp[80];
   swg_anlyzer.set_time_functions(my_millis, my_localtime);
   swg_anlyzer.setup();
-  swg_anlyzer.setup_alg(700, 720, 5, 20);
+  swg_anlyzer.setup_alg(700, 705, 0, 60*60, 20);
 
   for (int i = 0; i < 7; i++) {
     swg_anlyzer.set_schedule(i, 0, 60*60*24);
   }
-  swg_anlyzer.enable_datetime_check(0);
+  swg_anlyzer.enable_datetime_check(1);
 
   if (read_data() < 0)
     return -1;
 
   struct tm time_start_dt = {}; // Initialize to zero
   time_start_dt.tm_year = 2026 - 1900; // 2026
-  time_start_dt.tm_mon = 4 - 1;        // March
-  time_start_dt.tm_mday = 22;          // 29th
+  time_start_dt.tm_mon = 6 - 1;        // March
+  time_start_dt.tm_mday = 14;          // 29th
   time_start_dt.tm_hour = 0;
   time_start_dt.tm_min = 0;
   time_start_dt.tm_sec = 0;
   time_t time_start = mktime(&time_start_dt);
+
+  std::vector<std::string> date_list;
+  std::vector<int> orp_avg_list;
+  std::vector<int> swg_list;
+  int curr_day = -1;
+
 
   for (const auto& element : orp_data) {
     time_t timestamp = stoi(element[0]);
@@ -122,7 +128,7 @@ int main(int argc, char *argv[])
 
     // Limit stamp from 9:00 to 14:59 per day
     if (pump_only) {
-      if (dt_local.tm_hour < 9 || dt_local.tm_hour >= 15)
+      if (dt_local.tm_hour < 0 || dt_local.tm_hour >= 1)
         continue;
     }
 
@@ -215,7 +221,26 @@ int main(int argc, char *argv[])
       break;
     }
     cout << endl;
+
+    if (curr_day == -1) {
+        date_list.push_back(tstamp);
+        swg_list.push_back(swg_pct);
+        curr_day = swg_anlyzer.get_orp_day_curr();
+        orp_avg_list.push_back(swg_anlyzer.get_orp_day_avg(curr_day));
+    } else if (curr_day == swg_anlyzer.get_orp_day_curr()) {
+        orp_avg_list[orp_avg_list.size()-1] = swg_anlyzer.get_orp_day_avg(curr_day);
+        if (swg_pct > 0)
+          swg_list[orp_avg_list.size()-1] = swg_pct;
+    } else {
+        date_list.push_back(tstamp);
+        swg_list.push_back(swg_pct);
+        curr_day = swg_anlyzer.get_orp_day_curr();
+        orp_avg_list.push_back(swg_anlyzer.get_orp_day_avg(curr_day));
+    }
   }
 
+  for (size_t i = 0; i < date_list.size(); ++i) {
+    std::cout << date_list[i] << " " << orp_avg_list[i] << " SWG " << swg_list[i] << endl;
+  }
   return 0;
 }

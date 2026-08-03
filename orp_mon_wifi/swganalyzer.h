@@ -80,6 +80,8 @@ protected:
 #define SWG_ORP_ACTIVE_TIME_HRS_DEFAULT     3
 #define SWG_ORP_DELAY_TIME_HRS_DEFAULT      (3 * 24)
 #define SWG_ORP_MEASURE_TIME_HRS_DEFAULT    5
+#define SWG_ORP_MEASURE_TIME_START_DEFAULT  0
+#define SWG_ORP_MEASURE_TIME_END_DEFAULT    0
 
 #define ORP_DAY_RC_INIT                     1
 #define ORP_DAY_RC_SCHEDULE_SWG_COMPLETE    2
@@ -149,11 +151,14 @@ protected:
 class SWGAnalyzerv3 : public SWGAnalyzerv2 {
 public:
   SWGAnalyzerv3();
-  void setup_alg(int orp_day_cfg_target_val, int orp_day_max_cfg_target_val, int orp_day_cfg_measure_time_hours, int orp_pct_val);
-  void setup_alg(int orp_day_cfg_target_val, int orp_day_cfg_swg_time_hours, int orp_day_cfg_delay_time_hours, int orp_day_cfg_measure_time_hours, int orp_pct_val) { }
+  void setup_alg(int orp_day_cfg_target_val, int orp_day_max_cfg_target_val, int orp_day_cfg_measure_time_start, int orp_day_cfg_measure_time_end, int orp_pct_val);
   void setup_alg(int sample_time_sec, float std_dev, int orp_target_val, int orp_target_hysteresis_val, int orp_target_interval, int orp_target_guard, int orp_pct_val[5]) { }
+  void orp_add(int val,  bool swg_active);
   int get_alg_id() { return 3; }
   int get_swg_pct(int curr_swg_pct);
+
+  unsigned int swg_start_time;
+  unsigned int swg_end_time;
 
 };
 
