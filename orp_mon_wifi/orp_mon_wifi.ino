@@ -1572,7 +1572,7 @@ const char* htmlHostname = R"rawliteral(
 )rawliteral";
 
 const char* htmlMqttBroker = R"rawliteral(
-            <label for="broker">MQTT Server:</label>
+            <label for="broker">MQTT Server (%s):</label>
             <input type="text" id="broker" name="broker" value="%s" title="Default is 'aqualinkd.local'" required>
 )rawliteral";
 
@@ -1824,10 +1824,24 @@ void web_handle_root()
   snprintf(temp, sizeof(temp), htmlHostname, setting_info.hostname);
   server.sendContent(temp);
 
-  if (strlen(setting_info.mqtt_broker) == 0)
-    snprintf(temp, sizeof(temp), htmlMqttBroker, MQTT_SUGGEST_BROKER_DEFAULT);
-  else
-    snprintf(temp, sizeof(temp), htmlMqttBroker, setting_info.mqtt_broker);
+  if (strlen(setting_info.mqtt_broker) == 0) {
+    if (mqtt_is_connected_subscribed()) {
+      snprintf(temp, sizeof(temp), htmlMqttBroker, "Subscribed", MQTT_SUGGEST_BROKER_DEFAULT);
+    }
+    else if (mqtt_is_connected()) {
+      snprintf(temp, sizeof(temp), htmlMqttBroker, "Connected", MQTT_SUGGEST_BROKER_DEFAULT);
+    } else {
+      snprintf(temp, sizeof(temp), htmlMqttBroker, "", MQTT_SUGGEST_BROKER_DEFAULT);
+    }
+  } else {
+    if (mqtt_is_connected_subscribed()) {
+      snprintf(temp, sizeof(temp), htmlMqttBroker, "Subscribed", setting_info.mqtt_broker);
+    } else if (mqtt_is_connected()) {
+      snprintf(temp, sizeof(temp), htmlMqttBroker, "Connected", setting_info.mqtt_broker);
+    } else {
+      snprintf(temp, sizeof(temp), htmlMqttBroker, "", setting_info.mqtt_broker);
+    }
+  }
   server.sendContent(temp);
 
   snprintf(temp, sizeof(temp), htmlMqttUser, setting_info.mqtt_user);
