@@ -254,7 +254,7 @@ void SWGAnalyzer::set_schedule(int day_num, int start, int end)
 SWGAnalyzerv2::SWGAnalyzerv2()
 {
   setup();
-  setup_alg(SWG_ORP_DEFAULT, SWG_ORP_ACTIVE_TIME_HRS_DEFAULT, SWG_ORP_DELAY_TIME_HRS_DEFAULT, SWG_ORP_MEASURE_TIME_HRS_DEFAULT, SWG_ORP_PCT3_DEFAULT);
+  setup_alg(SWG_ORP_DEFAULT, SWG_ORP_ACTIVE_TIME_HRS_DEFAULT, SWG_ORP_DELAY_TIME_HRS_DEFAULT, SWG_ORP_MEASURE_TIME_HRS_DEFAULT, SWG_ORP_PCT3_DEFAULT, true);
 }
 
 void SWGAnalyzerv2::setup() {
@@ -262,23 +262,25 @@ void SWGAnalyzerv2::setup() {
   orp_day_reason_code = ORP_DAY_RC_INIT;
 }
 
-void SWGAnalyzerv2::setup_alg(int orp_day_cfg_target_val, int orp_day_cfg_swg_time_hours, int orp_day_cfg_delay_time_hours, int orp_day_cfg_measure_time_hours, int orp_pct_val)
+void SWGAnalyzerv2::setup_alg(int orp_day_cfg_target_val, int orp_day_cfg_swg_time_hours, int orp_day_cfg_delay_time_hours, int orp_day_cfg_measure_time_hours, int orp_pct_val, bool update)
 {
   orp_target_max = orp_target = orp_day_cfg_target_val;
 
-  for (int i = 0; i < TOTAL_NUM_DAYS_SAMPLE; i++) {
-    orp_day_sum[i] = 0;
-    orp_day_total[i] = 0;
-    orp_day_avg[i] = 0;
-    orp_day_swg_wkday[i] = -1;
+  if (!update) {
+    for (int i = 0; i < TOTAL_NUM_DAYS_SAMPLE; i++) {
+      orp_day_sum[i] = 0;
+      orp_day_total[i] = 0;
+      orp_day_avg[i] = 0;
+      orp_day_swg_wkday[i] = -1;
+    }
+    orp_day_curr = 0;
+    orp_day_state = ORP_DAY_STATE_INIT;
+    orp_day_swg_active_time_valid = 0;
+    orp_day_swg_active_time_st = 0;
+    orp_day_swg_active_time_ms = 0;
+    orp_day_delay_ts_ms = orp_day_measure_ts_ms = 0;
   }
-  orp_day_curr = 0;
-  orp_day_state = ORP_DAY_STATE_INIT;
-  orp_day_swg_active_time_valid = 0;
-  orp_day_swg_active_time_st = 0;
-  orp_day_swg_active_time_ms = 0;
-  orp_day_delay_ts_ms = orp_day_measure_ts_ms = 0;
-  
+
   orp_day_cfg_swg_time_ms = orp_day_cfg_swg_time_hours * 60 * 60 * 1000;
   orp_day_cfg_delay_time_ms = orp_day_cfg_delay_time_hours * 60 * 60 * 1000;
   orp_day_cfg_measure_time_ms = orp_day_cfg_measure_time_hours * 60 * 60 * 1000;
@@ -505,12 +507,12 @@ float SWGAnalyzerv2::get_remain_measure_hrs()
 SWGAnalyzerv3::SWGAnalyzerv3()
 {
   SWGAnalyzerv2::setup();
-  SWGAnalyzerv3::setup_alg(SWG_ORP_DEFAULT, SWG_ORP_MAX_DEFAULT, SWG_ORP_MEASURE_TIME_START_DEFAULT, SWG_ORP_MEASURE_TIME_END_DEFAULT, SWG_ORP_PCT0_DEFAULT);
+  SWGAnalyzerv3::setup_alg(SWG_ORP_DEFAULT, SWG_ORP_MAX_DEFAULT, SWG_ORP_MEASURE_TIME_START_DEFAULT, SWG_ORP_MEASURE_TIME_END_DEFAULT, SWG_ORP_PCT0_DEFAULT, false);
 }
 
-void SWGAnalyzerv3::setup_alg(int orp_day_cfg_target_val, int orp_day_max_cfg_target_val, int orp_day_cfg_measure_time_start, int orp_day_cfg_measure_time_end, int orp_pct_val)
+void SWGAnalyzerv3::setup_alg(int orp_day_cfg_target_val, int orp_day_max_cfg_target_val, int orp_day_cfg_measure_time_start, int orp_day_cfg_measure_time_end, int orp_pct_val, bool update)
 {
-  SWGAnalyzerv2::setup_alg(orp_day_cfg_target_val, 0, 0, (orp_day_cfg_measure_time_end - orp_day_cfg_measure_time_start) / 3600, orp_pct_val);
+  SWGAnalyzerv2::setup_alg(orp_day_cfg_target_val, 0, 0, (orp_day_cfg_measure_time_end - orp_day_cfg_measure_time_start) / 3600, orp_pct_val, update);
   orp_target_max = orp_day_max_cfg_target_val;
   swg_start_time = orp_day_cfg_measure_time_start;
   swg_end_time = orp_day_cfg_measure_time_end;

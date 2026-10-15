@@ -16,11 +16,22 @@
 #include <Wire.h>
 #include <HardwareSerial.h>
 
-#define DBG_SUPPORT 1         /* Print general debug information */
+//#define DBG_SUPPORT 1         /* Print general debug information */
 //#define DBG_STATUS 1        /* Print equivalent of menu on serial port */
 //#define DBG_MQTT 1          /* Print MQTT messages */
-#define DBG_ORP 1             /* Print ORP message */
+//#define DBG_ORP 1             /* Print ORP message */
 //#define SKIP_MQTT_PUBLISH 1   /* Set to 1 to skip publish any MQTT message - use for testing without actual control SWG */
+//#define ENABLE_RS485  1
+//#define SIM_ORP_TEST  1
+#define SYSINFO_SUPPORT 1
+
+#if defined(SYSINFO_SUPPORT)
+  #define SYSINFO_PRINT   Serial.print
+  #define SYSINFO_PRINTLN Serial.println
+#else
+  #define SYSINFO_PRINT(x)
+  #define SYSINFO_PRINTLN(x)
+#endif
 
 #if defined(DBG_SUPPORT)
   #define DBG_PRINT   Serial.print
@@ -219,6 +230,8 @@ int mqtt_swg_pct = -1;
 unsigned long mqtt_autoswg_ts = 0;
 int mqtt_autoswg_ts_valid = 0;
 
+unsigned long serial_send_ts = 0;
+
 //
 // Serial Setup
 void serial_setup()
@@ -289,19 +302,22 @@ struct tm *my_localtime()
   return &timeinfo;
 }
 
-void orp_data_setup()
+void orp_data_setup(bool update)
 {
-  swg_anlyzer.set_time_functions(millis, my_localtime);
-  swg_anlyzer.setup();
+  if (!update) {
+    swg_anlyzer.set_time_functions(millis, my_localtime);
+    swg_anlyzer.setup();
+  }
   if (swg_anlyzer.get_alg_id() == 1)
     swg_anlyzer.setup_alg(setting_info.swg_data_sample_time_sec, setting_info.swg_orp_std_dev, setting_info.swg_orp_target,
                           setting_info.swg_orp_hysteresis, setting_info.swg_orp_interval, setting_info.swg_orp_guard,
                           setting_info.swg_orp_pct);
   else if (swg_anlyzer.get_alg_id() == 2)
     swg_anlyzer.setup_alg(setting_info.swg_orp_target, setting_info.swg_orp_active_time_hrs, setting_info.swg_orp_delay_time_hrs,
-                          0, setting_info.swg_control > 0 ? setting_info.swg_orp_pct[0] : 0);
+                          0, setting_info.swg_control > 0 ? setting_info.swg_orp_pct[0] : 0, update);
   else
-    swg_anlyzer.setup_alg(setting_info.swg_orp_target, setting_info.swg_orp_target_max, setting_info.swg_orp_measure_time_start, setting_info.swg_orp_measure_time_end, setting_info.swg_control > 0 ? setting_info.swg_orp_pct[0] : 0);
+    swg_anlyzer.setup_alg(setting_info.swg_orp_target, setting_info.swg_orp_target_max, setting_info.swg_orp_measure_time_start,
+                          setting_info.swg_orp_measure_time_end, setting_info.swg_control > 0 ? setting_info.swg_orp_pct[0] : 0, update);
 
   for (int i = 0; i < 7; i++) {
     swg_anlyzer.set_schedule(i, setting_info.start_schedule[i], setting_info.end_schedule[i]);
@@ -1223,7 +1239,6 @@ bool is_wifi_connected() { return 0; }
 ///////////////////////////////////////////////////////////////////////////////
 void orp_loop()
 {
-//#define SIM_ORP_TEST  1
 #if defined(SIM_ORP_TEST)
   if ((millis() - ord_ts) >= 1000) {
     ord_ts = millis();
@@ -1231,15 +1246,15 @@ void orp_loop()
     if (orp_reading == 620)
       orp_reading = 725;
     else
-    orp_reading = 725;
+      orp_reading = 725;
 #if defined(WIFI_SUPPORT)
     // Publish only if pump is ON.
     if ((millis() - mqtt_orp_publish_ts) >= ORP_PUBLISH_TIMEMS) {
-      DBG_PRINTLN(swg_anlyzer.is_scheduled());
-      if (swg_anlyzer.is_scheduled())
-        DBG_PRINTLN("Scheduled");
-      else
-        DBG_PRINTLN("Not Scheduled");
+      // DBG_PRINTLN(swg_anlyzer.is_scheduled());
+      // if (swg_anlyzer.is_scheduled())
+      //   DBG_PRINTLN("Scheduled");
+      // else
+      //   DBG_PRINTLN("Not Scheduled");
 
       if (mqtt_is_pump_on() && swg_anlyzer.is_scheduled())
         mqtt_publish(int(orp_reading));
@@ -2285,7 +2300,7 @@ void web_handle_mqtt_submit()
   server.sendHeader("Location", "/");
   server.send(303); // Use 303 for "See Other" to prevent re-submission on refresh
 
-  orp_data_setup();
+  orp_data_setup(true);
 
   mqtt_client.stop();
   mqtt_connect_first_time = 1;
@@ -2712,14 +2727,35 @@ void ntp_setup() {}
 void ntp_loop() {}
 #endif /* WIFI_SUPPORT */
 
+//
+// Serial Reading Update
+void serial_send_data(bool now)
+{
+  char msg1[80];
+
+  if (now == 0 && (millis() - serial_send_ts) <= 3000)
+    return;
+
+  int cur = swg_anlyzer.get_orp_day_curr() + 1;
+  if (!is_orp_reading_expired()) {
+    sprintf(msg1, "ORP,%d,%d,%d", int(orp_reading), swg_anlyzer.get_last_swg_pct(), swg_anlyzer.get_orp_day_avg(cur));
+  } else {
+    sprintf(msg1, "ORP,%d,%d,%d", 0, swg_anlyzer.get_last_swg_pct(), swg_anlyzer.get_orp_day_avg(cur));
+  }
+  Serial.println(msg1);
+  serial_send_ts = millis();
+}
+
+#include "rs485_parser.h"
+
 void setup()
 {
   serial_setup();
   oled_setup();
   oled_update_normal(1);
 
-  DBG_PRINT("ORP Monitor v");
-  DBG_PRINTLN(FW_VERSION);
+  SYSINFO_PRINT("ORP Monitor v");
+  SYSINFO_PRINTLN(FW_VERSION);
 
   rotary_button_setup();
 
@@ -2727,7 +2763,10 @@ void setup()
   mqtt_setup();
   web_setup();
   ntp_setup();
-  orp_data_setup();
+  orp_data_setup(false);
+#ifdef ENABLE_RS485
+  rs485_setup();
+#endif
 }
 
 void loop()
@@ -2740,6 +2779,10 @@ void loop()
   mdns_loop();
   ntp_loop();
   orp_swg_ctrl_loop();
+#ifdef ENABLE_RS485
+  rs485_loop();
+  rs485_cmd_loop(is_orp_reading_expired() ? 0 : orp_reading);
+#endif
 
   switch (op_state) {
   case OP_MENU:
@@ -2775,6 +2818,7 @@ void loop()
     oled_update_normal(0);
     break;
   }
+  serial_send_data(0);
   
   oled_idle_check();
   check_status_msg_expired();

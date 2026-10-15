@@ -18,7 +18,8 @@ LFLAGS = /nologo /OUT:$(OUTDIR)\$(TARGET)
 
 # Define objects from different folders
 OBJS = $(OUTDIR)\swgtest.obj \
-       $(OUTDIR)\swganalyzer.obj
+       $(OUTDIR)\swganalyzer.obj \
+       $(OUTDIR)\rs485_parser.obj
 
 # Default target
 all: $(OUTDIR) $(OUTDIR)\$(TARGET)
@@ -39,6 +40,9 @@ $(OUTDIR)\swgtest.obj: swgtest.cpp
 
 $(OUTDIR)\swganalyzer.obj: ..\orp_mon_wifi\swganalyzer.cpp
     $(CC) $(CFLAGS) /c ..\orp_mon_wifi\swganalyzer.cpp /Fo$@
+
+$(OUTDIR)\rs485_parser.obj: ..\orp_mon_wifi\rs485_parser.cpp
+    $(CC) $(CFLAGS) /c ..\orp_mon_wifi\rs485_parser.cpp /Fo$@
 
 # Clean target
 clean:

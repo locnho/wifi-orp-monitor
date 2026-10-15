@@ -102,7 +102,7 @@ class SWGAnalyzerv2 : public SWGAnalyzer {
 public:
   SWGAnalyzerv2();
   void setup();
-  void setup_alg(int orp_day_cfg_target_val, int orp_day_cfg_swg_time_hours, int orp_day_cfg_delay_time_hours, int orp_day_cfg_measure_time_hours, int orp_pct_val);
+  void setup_alg(int orp_day_cfg_target_val, int orp_day_cfg_swg_time_hours, int orp_day_cfg_delay_time_hours, int orp_day_cfg_measure_time_hours, int orp_pct_val, bool update);
   void setup_alg(int sample_time_sec, float std_dev, int orp_target_val, int orp_target_hysteresis_val, int orp_target_interval, int orp_target_guard, int orp_pct_val[5]);
   void orp_add(int val,  bool swg_active);
   int get_swg_pct(int curr_swg_pct);
@@ -151,7 +151,7 @@ protected:
 class SWGAnalyzerv3 : public SWGAnalyzerv2 {
 public:
   SWGAnalyzerv3();
-  void setup_alg(int orp_day_cfg_target_val, int orp_day_max_cfg_target_val, int orp_day_cfg_measure_time_start, int orp_day_cfg_measure_time_end, int orp_pct_val);
+  void setup_alg(int orp_day_cfg_target_val, int orp_day_max_cfg_target_val, int orp_day_cfg_measure_time_start, int orp_day_cfg_measure_time_end, int orp_pct_val, bool update);
   void setup_alg(int sample_time_sec, float std_dev, int orp_target_val, int orp_target_hysteresis_val, int orp_target_interval, int orp_target_guard, int orp_pct_val[5]) { }
   void orp_add(int val,  bool swg_active);
   int get_alg_id() { return 3; }

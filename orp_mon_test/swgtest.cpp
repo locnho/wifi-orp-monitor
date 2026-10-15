@@ -7,7 +7,7 @@
  *
  */
 #define _CRT_SECURE_NO_WARNINGS
- #include <iostream>
+#include <iostream>
 #include <fstream>
 #include <sstream>
 #include <vector>
@@ -70,8 +70,25 @@ struct tm *my_localtime()
   return localtime(&raw_time);
 }
 
+#include "rs485_parser.h"
+
+void test_rs485()
+{
+  unsigned char msg[7] = { 0x10, 0x02, 0x84, 0x00, 0x96, 0x10, 0x03 };
+
+  for (int i = 0; i < sizeof(msg); i++) {
+    rs485_inner_loop(msg[i]);
+  }
+
+  rs485_cmd_loop(700);
+}
+
 int main(int argc, char *argv[])
 {
+#if 1
+  test_rs485();
+  return 0;
+#else
   int pump_only = 0;
 
   std::vector<std::string> args(argv + 1, argv + argc);
@@ -243,4 +260,5 @@ int main(int argc, char *argv[])
     std::cout << date_list[i] << " " << orp_avg_list[i] << " SWG " << swg_list[i] << endl;
   }
   return 0;
+#endif
 }
