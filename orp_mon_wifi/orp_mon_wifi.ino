@@ -22,7 +22,7 @@
 //#define DBG_ORP 1             /* Print ORP message */
 //#define SKIP_MQTT_PUBLISH 1   /* Set to 1 to skip publish any MQTT message - use for testing without actual control SWG */
 //#define ENABLE_RS485  1
-//#define SIM_ORP_TEST  1
+//#define SIM_ORP_TEST_VALUE  700
 #define SYSINFO_SUPPORT 1
 
 #if defined(SYSINFO_SUPPORT)
@@ -1239,14 +1239,11 @@ bool is_wifi_connected() { return 0; }
 ///////////////////////////////////////////////////////////////////////////////
 void orp_loop()
 {
-#if defined(SIM_ORP_TEST)
+#if defined(SIM_ORP_TEST_VALUE)
   if ((millis() - ord_ts) >= 1000) {
     ord_ts = millis();
     orp_caled = 1;
-    if (orp_reading == 620)
-      orp_reading = 725;
-    else
-      orp_reading = 725;
+    orp_reading = SIM_ORP_TEST_VALUE;
 #if defined(WIFI_SUPPORT)
     // Publish only if pump is ON.
     if ((millis() - mqtt_orp_publish_ts) >= ORP_PUBLISH_TIMEMS) {
@@ -1588,7 +1585,7 @@ const char* htmlHostname = R"rawliteral(
 
 const char* htmlMqttBroker = R"rawliteral(
             <label for="broker">MQTT Server (%s):</label>
-            <input type="text" id="broker" name="broker" value="%s" title="Default is 'aqualinkd.local'" required>
+            <input type="text" id="broker" name="broker" value="%s" title="Default is 'aqualinkd.local'. Set to blank to disable.">
 )rawliteral";
 
 const char* htmlMqttUser = R"rawliteral(
@@ -1839,23 +1836,12 @@ void web_handle_root()
   snprintf(temp, sizeof(temp), htmlHostname, setting_info.hostname);
   server.sendContent(temp);
 
-  if (strlen(setting_info.mqtt_broker) == 0) {
-    if (mqtt_is_connected_subscribed()) {
-      snprintf(temp, sizeof(temp), htmlMqttBroker, "Subscribed", MQTT_SUGGEST_BROKER_DEFAULT);
-    }
-    else if (mqtt_is_connected()) {
-      snprintf(temp, sizeof(temp), htmlMqttBroker, "Connected", MQTT_SUGGEST_BROKER_DEFAULT);
-    } else {
-      snprintf(temp, sizeof(temp), htmlMqttBroker, "", MQTT_SUGGEST_BROKER_DEFAULT);
-    }
+  if (mqtt_is_connected_subscribed()) {
+    snprintf(temp, sizeof(temp), htmlMqttBroker, "Subscribed", setting_info.mqtt_broker);
+  } else if (mqtt_is_connected()) {
+    snprintf(temp, sizeof(temp), htmlMqttBroker, "Connected", setting_info.mqtt_broker);
   } else {
-    if (mqtt_is_connected_subscribed()) {
-      snprintf(temp, sizeof(temp), htmlMqttBroker, "Subscribed", setting_info.mqtt_broker);
-    } else if (mqtt_is_connected()) {
-      snprintf(temp, sizeof(temp), htmlMqttBroker, "Connected", setting_info.mqtt_broker);
-    } else {
-      snprintf(temp, sizeof(temp), htmlMqttBroker, "", setting_info.mqtt_broker);
-    }
+    snprintf(temp, sizeof(temp), htmlMqttBroker, "", setting_info.mqtt_broker);
   }
   server.sendContent(temp);
 
@@ -2101,6 +2087,8 @@ void web_handle_mqtt_submit()
     receivedMessage = server.arg("broker");
     strncpy(setting_info.mqtt_broker, server.arg("broker").c_str(), 64);
     setting_info.mqtt_broker[63] = 0;
+  } else {
+    setting_info.mqtt_broker[0] = 0;
   }
   if (server.hasArg("username")) {
     receivedMessage += " ";
