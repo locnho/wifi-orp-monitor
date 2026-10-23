@@ -1605,7 +1605,7 @@ const char* htmlMqttPort = R"rawliteral(
 
 const char* htmlMqttTopic = R"rawliteral(
             <label for="topic">MQTT ORP Topic:</label>
-            <input type="text" id="topic" name="topic" title="For AquaLinkD, set to 'aqualinkd/CHEM/ORP/set'" value="%s" required>
+            <input type="text" id="topic" name="topic" title="For AquaLinkD, set to 'aqualinkd/CHEM/ORP/set'. Leave blank to disable." value="%s">
 )rawliteral";
 
 const char* htmlMqttPumpTopic = R"rawliteral(
@@ -1615,7 +1615,7 @@ const char* htmlMqttPumpTopic = R"rawliteral(
 
 const char* htmlMqttSWGTopic = R"rawliteral(
             <label for="swgtopic">MQTT SWG Topic:</label>
-            <input type="text" id="swgtopic" name="swgtopic" title="For AquaLinkD, set to 'aqualinkd/SWG/Percent'" value="%s" required>
+            <input type="text" id="swgtopic" name="swgtopic" title="For AquaLinkD, set to 'aqualinkd/SWG/Percent'. Leave blank to disable." value="%s">
 )rawliteral";
 
 // const char* htmlMqttORAlarmPTopic = R"rawliteral(
@@ -2112,6 +2112,8 @@ void web_handle_mqtt_submit()
     receivedMessage += server.arg("topic");
     strncpy(setting_info.mqtt_topic, server.arg("topic").c_str(), 64);
     setting_info.mqtt_topic[63] = 0;
+  } else {
+    setting_info.mqtt_topic[0] = 0;
   }
   if (server.hasArg("pumptopic")) {
     receivedMessage += " ";
@@ -2126,6 +2128,8 @@ void web_handle_mqtt_submit()
     receivedMessage += server.arg("swgtopic");
     strncpy(setting_info.mqtt_swg_topic, server.arg("swgtopic").c_str(), 64);
     setting_info.mqtt_swg_topic[63] = 0;
+  } else {
+    setting_info.mqtt_swg_topic[0] = 0;
   }
   if (server.hasArg("orpcal")) {
     receivedMessage += " ";
@@ -2526,6 +2530,9 @@ void mqtt_publish(int orp)
     if ((millis() - mqtt_publish_ts) <= 15000) {
       return;
     }
+  }
+  if (strlen(setting_info.mqtt_topic) <= 0) {
+    return;
   }
 
   sprintf(msg, "%d", orp);
