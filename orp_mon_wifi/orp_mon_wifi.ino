@@ -65,7 +65,7 @@
   #define MQTT_PRINTLN(x)
 #endif
 
-#define FW_VERSION    "0.7"
+#define FW_VERSION    "0.8"
 
 //
 // Rotary and Button
@@ -131,6 +131,7 @@ enum OP_STATE op_state = OP_NORMAL;
 #include <ArduinoMDNS.h>
 #include "time.h"
 #include "esp_sntp.h"
+#include <Update.h>
 
 typedef struct {
   uint32_t signature1;
@@ -1456,7 +1457,7 @@ WebServer server(HTTP_PORT);
 String receivedMessage = "";
 unsigned long receivedMessage_ts = 0;
 
-const char* htmlFormStart = R"rawliteral(
+const char* htmlFormStartP1 = R"rawliteral(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1471,7 +1472,7 @@ const char* htmlFormStart = R"rawliteral(
             padding: 0;
         }
         .form-container {
-            width: 500px;
+            width: 400px;
             margin: 50px auto;
             background-color: white;
             padding: 20px;
@@ -1548,6 +1549,31 @@ const char* htmlFormStart = R"rawliteral(
         h1 {
            text-align: center;
         }
+        /* Base Reset (Ensures consistent sizing) */
+        .btn {
+          font-family: inherit;
+          outline: none;
+          align-items: center;
+        }
+        /* 1. Modern Primary Button */
+        .btn-primary {
+          background-color: #2563eb;
+          color: #ffffff;
+          padding: 12px 24px;
+          font-size: 16px;
+          font-weight: 600;
+          border: none;
+          border-radius: 8px;
+          cursor: pointer;
+          transition: background-color 0.2s ease, transform 0.1s ease;
+        }
+        .btn-primary:hover {
+          background-color: #1d4ed8;
+          transform: translateY(-1px);
+        }
+        .btn-primary:active {
+          transform: translateY(1px);
+        }
     </style>
 </head>
 <body>
@@ -1573,8 +1599,12 @@ const char* htmlFormStart = R"rawliteral(
         swg4.textContent = `ORP ${tgtValue - hystValue - (intValue*5) + 1} - ${tgtValue - hystValue - (intValue * 4)} mV (%):`;
       }
     </script>
+)rawliteral";
+
+const char* htmlFormStartP2 = R"rawliteral(
     <div class="form-container">
-        <h1 >ORP Configuration</h1>
+        <h1>ORP Configuration</h1>
+        <p style="text-align: center">Version: %s</p>
         <form action="/submit" method="POST">
 )rawliteral";
 
@@ -1815,6 +1845,9 @@ const char* htmlFormEnd = R"rawliteral(
         </form>
         <p>You must power cycle the device to take effect.</p>
         <p>Last message received: %s</p>
+        <div style="display: flex; justify-content: center">
+            <button style="align: center" class="btn btn-primary" onclick="window.location.href='/update'">Update</button>
+        </div>
     </div>
 </body>
 
@@ -1831,7 +1864,9 @@ void web_handle_root()
   int val;
 
   server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server.send(200, "text/html", htmlFormStart);
+  server.send(200, "text/html", htmlFormStartP1);
+  snprintf(temp, sizeof(temp), htmlFormStartP2, FW_VERSION);
+  server.sendContent(temp);
 
   snprintf(temp, sizeof(temp), htmlHostname, setting_info.hostname);
   server.sendContent(temp);
@@ -2298,10 +2333,231 @@ void web_handle_mqtt_submit()
   mqtt_connect_first_time = 1;
 }
 
+// R Macro string literal https://en.cppreference.com/w/cpp/language/string_literal
+const char OTA_UDPATE_HTML_PART1[] PROGMEM = R"!^!(
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>OTA Update</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f9;
+      margin: 0;
+      padding: 0;
+    }
+    .form-container {
+        width: 400px;
+        margin: 50px auto;
+        background-color: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    input[type=file]::file-selector-button, .btn {
+      margin-right: 20px;
+      border: 1px solid gray;
+      background-image: linear-gradient(to bottom,#59ef59 0, #55982f 100%);
+      padding: 10px 20px;
+      border-radius: 4px;
+      color: #fff;
+      cursor: pointer;
+      transition: background .2s ease-in-out;
+      width: 10em;
+    }
+    .btn {
+      margin-top: 12px;
+      background-image: linear-gradient(to bottom,#78addb 0,#2d6ca2 100%);
+    }
+    .prog_bar {
+      margin: 12px 0;
+      text-shadow: 2px 2px 3px black;
+      padding: 5px 0;
+      display: none;
+      border: 1px solid #7c7c7c;
+      background-image: linear-gradient(to right,#d2d2d2 0,#2d2d2d 100%);
+      line-height: 1.3em;
+      border-radius: 4px;
+      text-align: center;
+      color: white;
+      font-size: 250%;
+    }
+  </style>
+</head>
+<body>
+  <script>
+    var domReady = function(callback) {
+      document.readyState === "interactive" || document.readyState === "complete" ? callback() : document.addEventListener("DOMContentLoaded", callback);
+    };
+    domReady(function() {
+      var myform = document.getElementById('upload_form');
+      var filez  = document.getElementById('file');
+
+      myform.onsubmit = function(event) {
+        event.preventDefault();
+
+        var formData = new FormData();
+        var file     = filez.files[0];
+
+        if (!file) { return false; }
+
+        formData.append("files", file, file.name);
+
+        var xhr = new XMLHttpRequest();
+        xhr.upload.addEventListener("progress", function(evt) {
+          if (evt.lengthComputable) {
+            var per = Math.round((evt.loaded / evt.total) * 100);
+            var prg = document.getElementById('prg');
+
+            var str = per + "%";
+            prg.style.width   = str;
+
+            prg.innerHTML = str;
+
+            prg.style.display = "block";
+          }
+        }, false);
+        xhr.open('POST', location.href, true);
+
+        // Set up a handler for when the request finishes.
+        xhr.onload = function () {
+          if (xhr.status === 200) {
+            //alert('Success');
+          } else {
+            //alert('An error occurred!');
+          }
+        };
+
+        xhr.send(formData);
+      }
+    });
+  </script>
+)!^!";
+
+const char OTA_UDPATE_HTML_PART2[] PROGMEM = R"!^!(
+  <div class="form-container">
+    <h1 style="text-align: center">ORP Firmware Update</h1>
+    <p style="text-align: center">Version: %s</p>
+    <form method="POST" action="#" enctype="multipart/form-data" id="upload_form">
+      <div><input class="" type="file" name="update" id="file"></div>
+		  <div><input class="btn" type="submit" value="Upload"></div>
+	  </form>
+	  <p>
+		  <b>Board:</b> %s<br />
+		  <b>MAC:</b> %s<br />
+	  </p>
+	  <div>
+		  <div id="prg" class="prog_bar" style=""></div>
+	  </div>
+  </div>
+  </body>
+</html>
+)!^!";
+
+String get_mac_address()
+{
+	uint8_t mac[6];
+
+	// Put the addr in mac
+	WiFi.macAddress(mac);
+
+	// Build a string and return it
+	char buf[20] = "";
+	snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X", mac[0],mac[1],mac[2],mac[3],mac[4],mac[5]);
+
+	String ret = buf;
+
+	return ret;
+}
+
+String get_board_type()
+{
+  // More information: https://github.com/search?q=repo%3Aarendst%2FTasmota%20esp32s2&type=code
+  #if defined(ESP8266)
+    String BOARD_NAME = "ESP8266";
+  #elif defined(CONFIG_IDF_TARGET_ESP32S2)
+    String BOARD_NAME = "ESP32-S2";
+  #elif defined(CONFIG_IDF_TARGET_ESP32S3)
+    String BOARD_NAME = "ESP32-S3";
+  #elif defined(CONFIG_IDF_TARGET_ESP32C3)
+    String BOARD_NAME = "ESP32-C3";
+  #elif defined(CONFIG_IDF_TARGET_ESP32)
+    String BOARD_NAME = "ESP32";
+  #elif defined(CONFIG_ARDUINO_VARIANT)
+    String BOARD_NAME = CONFIG_ARDUINO_VARIANT;
+  #else
+    String BOARD_NAME = "Unknown";
+  #endif
+
+	return BOARD_NAME;
+}
+
+long max_sketch_size()
+{
+	long ret = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+
+	return ret;
+}
+
 void web_setup()
 {
   server.on("/", HTTP_GET, web_handle_root);
   server.on("/submit", HTTP_POST, web_handle_mqtt_submit); // Handle POST requests to /submit
+  server.on("/update", HTTP_GET, []() {
+    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server.send(200, "text/html", OTA_UDPATE_HTML_PART1);
+
+    //uint32_t maxSketchSpace = max_sketch_size();
+		String html = "";
+    char buf[1024];
+    String board_type = get_board_type();
+    String mac_addr   = get_mac_address();
+    snprintf_P(buf, sizeof(buf), OTA_UDPATE_HTML_PART2, FW_VERSION, board_type, mac_addr.c_str());
+    html = buf;
+		server.sendContent(html.c_str());
+    server.sendContent(F(""));
+	});
+	server.on("/update", HTTP_POST, []() {
+		server.send(200, "text/plain", (Update.hasError()) ? "Update: fail\n" : "Update: OK!\n");
+		delay(500);
+		ESP.restart();
+	}, []() {
+		HTTPUpload& upload = server.upload();
+
+		if (upload.status == UPLOAD_FILE_START) {
+			Serial.printf("Firmware update initiated: %s\r\n", upload.filename.c_str());
+
+			//uint32_t maxSketchSpace = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+			uint32_t maxSketchSpace = max_sketch_size();
+
+			if (!Update.begin(maxSketchSpace)) { //start with max available size
+				Update.printError(Serial);
+			}
+		} else if (upload.status == UPLOAD_FILE_WRITE) {
+			/* flashing firmware to ESP*/
+			if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
+				Update.printError(Serial);
+			}
+
+			// Store the next milestone to output
+			uint16_t chunk_size  = 51200;
+			static uint32_t next = 51200;
+
+			// Check if we need to output a milestone (100k 200k 300k)
+			if (upload.totalSize >= next) {
+				Serial.printf("%dk ", next / 1024);
+				next += chunk_size;
+			}
+		} else if (upload.status == UPLOAD_FILE_END) {
+			if (Update.end(true)) { //true to set the size to the current progress
+				Serial.printf("\r\nFirmware update successful: %u bytes\r\nRebooting...\r\n", upload.totalSize);
+			} else {
+				Update.printError(Serial);
+			}
+		}
+	});
   server.begin();
   DBG_PRINTLN("HTTP server started");
 }
